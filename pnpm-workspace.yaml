@@ -38,6 +38,10 @@ peerDependencyRules:
 # default and only allow scripts we need. esbuild (native binary) and lefthook
 # (git hooks) genuinely need theirs.
 allowBuilds:
+  electron: true
+  # electron-builder pulls this Windows-only helper into the macOS package
+  # toolchain; its install script is not needed for the Apple Silicon build.
+  electron-winstaller: false
   esbuild: true
   lefthook: true
   # Cross-platform boundary for the persistent PTY backend, including ConPTY on Windows.
