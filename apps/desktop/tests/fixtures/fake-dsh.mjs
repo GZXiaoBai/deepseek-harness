@@ -1,9 +1,14 @@
 import { createServer } from 'node:http'
+import { spawn } from 'node:child_process'
 
 const modeIndex = process.argv.indexOf('--mode')
 const mode = modeIndex === -1 ? 'normal' : process.argv[modeIndex + 1]
 
-if (mode === 'early-exit') {
+if (process.argv.includes('--ignoring-descendant')) {
+  process.on('SIGTERM', () => {})
+  process.stdout.write('ignoring descendant ready\n')
+  setInterval(() => {}, 1_000)
+} else if (mode === 'early-exit') {
   process.exitCode = 42
 } else if (mode === 'non-matching-output') {
   process.stdout.write('Listening on a different format\n')
@@ -14,7 +19,7 @@ if (mode === 'early-exit') {
     response.end('fake dsh')
   })
 
-  server.listen(0, '127.0.0.1', () => {
+  const startServer = () => server.listen(0, '127.0.0.1', () => {
     const address = server.address()
     if (address === null || typeof address === 'string') throw new Error('Expected a TCP listener')
 
@@ -29,6 +34,13 @@ if (mode === 'early-exit') {
       announce()
     }
   })
+
+  if (mode === 'leader-with-ignoring-descendant') {
+    const descendant = spawn(process.execPath, [process.argv[1], '--ignoring-descendant'], { stdio: ['ignore', 'pipe', 'ignore'] })
+    descendant.stdout.once('data', startServer)
+  } else {
+    startServer()
+  }
 
   if (mode === 'ignore-term') {
     process.on('SIGTERM', () => {})
