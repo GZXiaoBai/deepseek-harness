@@ -33,6 +33,18 @@ describe('classifyNavigation', () => {
   })
 
   it.each([
+    ['a remote HTTP origin', 'http://example.test:43127', 'http://example.test:43127/session'],
+    ['a remote HTTPS origin', 'https://example.test:43127', 'https://example.test:43127/session'],
+    ['a loopback HTTPS origin', 'https://127.0.0.1:43127', 'https://127.0.0.1:43127/session'],
+    ['a harness origin with no port', 'http://127.0.0.1', 'http://127.0.0.1:43127/session'],
+    ['a harness origin with an invalid port', 'http://127.0.0.1:not-a-port', 'http://127.0.0.1:43127/session'],
+    ['a harness origin with port zero', 'http://127.0.0.1:0', 'http://127.0.0.1:43127/session'],
+    ['a harness origin with an out-of-range port', 'http://127.0.0.1:65536', 'http://127.0.0.1:43127/session'],
+  ])('denies %s rather than allowing an unconfirmed trusted origin', (_case, origin, target) => {
+    expect(classifyNavigation(new URL(target), origin)).toBe('deny')
+  })
+
+  it.each([
     ['a non-URL origin', 'not an origin'],
     ['an unterminated IPv6 origin', 'http://[::1'],
     ['a file origin', 'file:///tmp'],
