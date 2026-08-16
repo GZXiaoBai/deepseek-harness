@@ -1,9 +1,16 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { DesktopLogger } from './desktop-logger.ts'
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import type { DesktopLogSink } from './desktop-logger.ts'
 import { parseHarnessUrl } from './harness-url.ts'
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
+
+/** Child-process operation used by the controller's fixed argument form. */
+export type HarnessProcessSpawner = (
+  executable: string,
+  args: readonly string[],
+  options: SpawnOptions,
+) => ChildProcess
 
 /** Dependencies and paths required to run the bundled Harness web server. */
 export interface HarnessProcessOptions {
@@ -14,10 +21,10 @@ export interface HarnessProcessOptions {
   env: NodeJS.ProcessEnv
   startupTimeoutMs?: number
   shutdownTimeoutMs?: number
-  spawnProcess?: typeof spawn
+  spawnProcess?: HarnessProcessSpawner
   killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void
   healthCheck?: (url: URL, signal: AbortSignal) => Promise<void>
-  logger: DesktopLogger
+  logger: DesktopLogSink
 }
 
 type HarnessProcessState = 'idle' | 'starting' | 'ready' | 'stopping'
@@ -44,7 +51,7 @@ interface RunningHarness {
  */
 export class HarnessProcessController {
   readonly #options: Required<Pick<HarnessProcessOptions, 'startupTimeoutMs' | 'shutdownTimeoutMs'>> & HarnessProcessOptions
-  readonly #spawnProcess: typeof spawn
+  readonly #spawnProcess: HarnessProcessSpawner
   readonly #killProcessGroup: (pid: number, signal: NodeJS.Signals) => void
   readonly #healthCheck: (url: URL, signal: AbortSignal) => Promise<void>
   readonly #unexpectedExitListeners = new Set<(error: Error) => void>()
@@ -108,8 +115,12 @@ export class HarnessProcessController {
     this.#state = 'starting'
     this.#log('harness-starting')
 
-    child.once('error', error => this.#failStart(run, asError(error, 'Unable to start Harness process')))
-    child.once('exit', (code, signal) => this.#handleExit(run, code, signal))
+    child.once('error', (error) => {
+      this.#failStart(run, asError(error, 'Unable to start Harness process'))
+    })
+    child.once('exit', (code, signal) => {
+      this.#handleExit(run, code, signal)
+    })
     this.#readLines(run, 'stdout', child.stdout)
     this.#readLines(run, 'stderr', child.stderr)
     run.startupTimer = setTimeout(() => {
