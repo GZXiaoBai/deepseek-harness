@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ApplicationController,
+  installTerminationSignalHandlers,
   installTopLevelNavigationGuard,
   launchDesktopApplication,
   type ApplicationMenu,
@@ -13,6 +14,7 @@ import {
   type HarnessLifecycle,
   type ShutdownEvent,
   type StartupFailureAction,
+  type TerminationSignal,
 } from '../src/main.ts'
 
 const directories: string[] = []
@@ -31,13 +33,16 @@ class TestWindow implements DesktopWindow {
   #bounds = { x: 20, y: 30, width: 1100, height: 720 }
   #open: ((url: string) => void) | undefined
   #navigate: ((url: string) => boolean) | undefined
+  readonly #loadFileBarrier: Promise<void>
 
-  constructor(options: DesktopWindowOptions) {
+  constructor(options: DesktopWindowOptions, loadFileBarrier: Promise<void>) {
     this.options = options
+    this.#loadFileBarrier = loadFileBarrier
   }
 
   async loadFile(path: string): Promise<void> {
     this.loaded.push(path)
+    await this.#loadFileBarrier
   }
 
   async loadUrl(url: string): Promise<void> {
@@ -89,6 +94,26 @@ class TestWindow implements DesktopWindow {
   }
 }
 
+class TestSignalSource {
+  readonly #listeners = new Map<TerminationSignal, Set<() => void>>()
+  defaultTerminations = 0
+
+  on(signal: TerminationSignal, listener: () => void): void {
+    const listeners = this.#listeners.get(signal) ?? new Set()
+    listeners.add(listener)
+    this.#listeners.set(signal, listeners)
+  }
+
+  emit(signal: TerminationSignal): void {
+    const listeners = this.#listeners.get(signal)
+    if (listeners === undefined || listeners.size === 0) {
+      this.defaultTerminations += 1
+      return
+    }
+    for (const listener of listeners) listener()
+  }
+}
+
 class TestAdapter implements DesktopAdapter {
   lock = true
   exited = false
@@ -99,6 +124,7 @@ class TestAdapter implements DesktopAdapter {
   openedPaths: string[] = []
   failureActions: StartupFailureAction[] = []
   ready: Promise<void> = Promise.resolve()
+  windowLoad: Promise<void> = Promise.resolve()
   #secondInstance: (() => void) | undefined
   #beforeQuit: ((event: ShutdownEvent) => void) | undefined
   #allWindowsClosed: (() => void) | undefined
@@ -117,7 +143,7 @@ class TestAdapter implements DesktopAdapter {
   }
 
   createWindow(options: DesktopWindowOptions): DesktopWindow {
-    this.window = new TestWindow(options)
+    this.window = new TestWindow(options, this.windowLoad)
     return this.window
   }
 
@@ -281,6 +307,30 @@ describe('desktop application controller', () => {
     expect(adapter.window?.loaded).toEqual([options.startupDocument, 'http://127.0.0.1:43127/'])
   })
 
+  it.each([
+    ['last-window close', (adapter: TestAdapter) => { adapter.emitAllWindowsClosed() }],
+    ['menu Quit', (adapter: TestAdapter) => {
+      adapter.menu?.flatMap(item => item.submenu ?? []).find(item => item.label === 'Quit')?.action?.()
+    }],
+  ])('does not start Harness after %s completes while the startup document is loading', async (_case, shutDown) => {
+    const adapter = new TestAdapter()
+    const startupDocument = Promise.withResolvers<undefined>()
+    adapter.windowLoad = startupDocument.promise
+    const harness = new TestHarness()
+    const options = await createOptions(adapter, harness)
+    const launching = launchDesktopApplication(adapter, async () => new ApplicationController(options))
+    await expect.poll(() => adapter.window?.loaded).toEqual([options.startupDocument])
+
+    shutDown(adapter)
+    await expect.poll(() => adapter.quitCount).toBe(1)
+    expect(harness.transitions).toEqual(['stop'])
+
+    startupDocument.resolve(undefined)
+    await launching
+    expect(adapter.quitCount).toBe(1)
+    expect(harness.transitions).toEqual(['stop'])
+  })
+
   it('cleans up a failed attempt before retrying on a new URL', async () => {
     const adapter = new TestAdapter()
     adapter.failureActions.push('retry')
@@ -382,4 +432,38 @@ describe('desktop application controller', () => {
     expect(adapter.quitCount).toBe(1)
     expect(adapter.emitBeforeQuit()).toBe(false)
   })
+
+  it.each(['SIGTERM', 'SIGINT'] as const)(
+    'keeps repeated %s events inside the same pending shutdown barrier',
+    async (signal) => {
+      const adapter = new TestAdapter()
+      const harness = new TestHarness()
+      const stop = Promise.withResolvers<undefined>()
+      harness.pendingStop = stop.promise
+      const application = await launchDesktopApplication(adapter, async () => (
+        new ApplicationController(await createOptions(adapter, harness))
+      ))
+      if (application === undefined) throw new Error('primary application did not start')
+      const signals = new TestSignalSource()
+      const shutdowns: Promise<void>[] = []
+      installTerminationSignalHandlers(signals, () => {
+        shutdowns.push(application.requestShutdown())
+      })
+
+      signals.emit(signal)
+      signals.emit(signal)
+      await flush()
+
+      expect(signals.defaultTerminations).toBe(0)
+      expect(shutdowns).toHaveLength(2)
+      expect(shutdowns[0]).toBe(shutdowns[1])
+      expect(harness.transitions).toEqual(['start', 'stop'])
+      expect(adapter.quitCount).toBe(0)
+
+      stop.resolve(undefined)
+      await flush()
+      expect(adapter.quitCount).toBe(1)
+    },
+  )
+
 })
