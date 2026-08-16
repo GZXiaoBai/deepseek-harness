@@ -9,8 +9,16 @@ import { HarnessProcessController, type HarnessProcessOptions } from '../src/har
 
 const fixturePath = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url))
 const userDataDirectories: string[] = []
+const processGroups: number[] = []
 
 afterEach(async () => {
+  for (const pid of processGroups.splice(0)) {
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+    }
+  }
   await Promise.all(userDataDirectories.splice(0).map(async directory => rm(directory, { force: true, recursive: true })))
 })
 
@@ -33,6 +41,7 @@ async function createController(
     const mode = modes[spawnCount++]
     const child = spawn(command, [...args, '--mode', mode], options)
     children.push(child)
+    if (child.pid !== undefined) processGroups.push(child.pid)
     return child
   }) as typeof spawn
 
@@ -139,6 +148,49 @@ describe('HarnessProcessController', () => {
     await controller.stop()
 
     expect(kills).toEqual([[-pid!, 'SIGTERM'], [-pid!, 'SIGKILL']])
+  })
+
+  it('reaps an ignoring descendant after its leader exits on SIGTERM before allowing retry', async () => {
+    const { controller, kills, children } = await createController(['leader-with-ignoring-descendant', 'normal'])
+
+    await controller.start()
+    const pid = children[0]?.pid
+    await controller.stop()
+
+    expect(kills).toEqual([[-pid!, 'SIGTERM'], [-pid!, 'SIGKILL']])
+    await expect(controller.start()).resolves.toMatchObject({ hostname: '127.0.0.1' })
+    await controller.stop()
+  })
+
+  it('retains a live process group after a signal failure until a later stop establishes cleanup', async () => {
+    let rejectSignals = true
+    const { controller } = await createController(['normal', 'normal'], {
+      killProcessGroup: (pid, signal) => {
+        if (rejectSignals) throw Object.assign(new Error('permission denied'), { code: 'EPERM' })
+        process.kill(pid, signal)
+      },
+    })
+
+    await controller.start()
+    await expect(controller.stop()).rejects.toThrow('permission denied')
+    await expect(controller.start()).rejects.toThrow('already starting or ready')
+
+    rejectSignals = false
+    await expect(controller.stop()).resolves.toBeUndefined()
+  })
+
+  it('contains logger failures while starting, stopping, and reporting an unexpected exit', async () => {
+    const throwingLogger = { log: () => { throw new Error('disk unavailable') } } as DesktopLogger
+    const { controller, children } = await createController(['normal', 'exit-later'], { logger: throwingLogger })
+    const exit = Promise.withResolvers<Error>()
+    controller.onUnexpectedExit(error => exit.resolve(error))
+
+    await expect(controller.start()).resolves.toMatchObject({ hostname: '127.0.0.1' })
+    await expect(controller.stop()).resolves.toBeUndefined()
+    expect(children[0]?.exitCode ?? children[0]?.signalCode).not.toBeNull()
+
+    await expect(controller.start()).resolves.toMatchObject({ hostname: '127.0.0.1' })
+    await expect(exit.promise).resolves.toMatchObject({ message: expect.stringContaining('exited unexpectedly') })
   })
 
   it('reports an unexpected runtime exit after readiness', async () => {

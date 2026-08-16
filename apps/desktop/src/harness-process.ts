@@ -24,8 +24,6 @@ type HarnessProcessState = 'idle' | 'starting' | 'ready' | 'stopping'
 
 interface RunningHarness {
   child: ChildProcess
-  done: Promise<void>
-  resolveDone: () => void
   start: Promise<URL>
   resolveStart: (url: URL) => void
   rejectStart: (error: Error) => void
@@ -35,6 +33,7 @@ interface RunningHarness {
   startSettled: boolean
   startupTimer: ReturnType<typeof setTimeout> | undefined
   stop: Promise<void> | undefined
+  startFailure: Error | undefined
 }
 
 /**
@@ -91,12 +90,9 @@ export class HarnessProcessController {
       return Promise.reject(asError(error, 'Unable to start Harness process'))
     }
 
-    const done = Promise.withResolvers<void>()
     const starting = Promise.withResolvers<URL>()
     const run: RunningHarness = {
       child,
-      done: done.promise,
-      resolveDone: done.resolve,
       start: starting.promise,
       resolveStart: starting.resolve,
       rejectStart: starting.reject,
@@ -106,14 +102,14 @@ export class HarnessProcessController {
       startSettled: false,
       startupTimer: undefined,
       stop: undefined,
+      startFailure: undefined,
     }
     this.#current = run
     this.#state = 'starting'
-    this.#options.logger.log('harness-starting')
+    this.#log('harness-starting')
 
     child.once('error', error => this.#failStart(run, asError(error, 'Unable to start Harness process')))
     child.once('exit', (code, signal) => this.#handleExit(run, code, signal))
-    child.once('close', () => run.resolveDone())
     this.#readLines(run, 'stdout', child.stdout)
     this.#readLines(run, 'stderr', child.stderr)
     run.startupTimer = setTimeout(() => {
@@ -126,7 +122,7 @@ export class HarnessProcessController {
   /**
    * Reaps the currently owned process group, if one exists.
    *
-   * @returns A promise that resolves once the child has exited.
+   * @returns A promise that resolves once the owned process group has disappeared.
    */
   stop(): Promise<void> {
     if (this.#current === undefined) return Promise.resolve()
@@ -169,7 +165,7 @@ export class HarnessProcessController {
   }
 
   #handleOutputLine(run: RunningHarness, stream: 'stdout' | 'stderr', line: string): void {
-    this.#options.logger.log('harness-output', { stream, text: line })
+    this.#log('harness-output', { stream, text: line })
     if (stream !== 'stdout' || this.#current !== run || this.#state !== 'starting' || run.healthCheckStarted) return
 
     const url = parseHarnessUrl(line)
@@ -191,11 +187,10 @@ export class HarnessProcessController {
 
     this.#settleStart(run, url)
     this.#state = 'ready'
-    this.#options.logger.log('harness-ready', { url: url.href })
+    this.#log('harness-ready', { url: url.href })
   }
 
   #handleExit(run: RunningHarness, code: number | null, signal: NodeJS.Signals | null): void {
-    run.resolveDone()
     if (this.#current !== run || run.expectedStop) return
 
     const error = new Error(describeExit('Harness process exited before readiness', code, signal))
@@ -205,59 +200,59 @@ export class HarnessProcessController {
     }
 
     if (this.#state === 'ready') {
-      this.#current = undefined
-      this.#state = 'idle'
-      this.#options.logger.log('harness-unexpected-exit', { code, signal })
+      this.#log('harness-unexpected-exit', { code, signal })
       this.#notifyUnexpectedExit(new Error(describeExit('Harness process exited unexpectedly', code, signal)))
+      this.#beginStop(run)
     }
   }
 
   #failStart(run: RunningHarness, error: Error): void {
     if (this.#current !== run || run.startSettled) return
 
-    run.expectedStop = true
-    this.#options.logger.log('harness-start-failed', { message: error.message })
-    this.#beginStop(run, error)
+    run.startFailure = error
+    this.#log('harness-start-failed', { message: error.message })
+    this.#beginStop(run)
   }
 
-  #beginStop(run: RunningHarness, startFailure?: Error): void {
+  #beginStop(run: RunningHarness): void {
     if (run.stop !== undefined) return
 
     run.expectedStop = true
     this.#state = 'stopping'
     clearTimeout(run.startupTimer)
     run.abortController.abort()
-    this.#options.logger.log('harness-stopping')
-    run.stop = this.#terminate(run).then(
+    this.#log('harness-stopping')
+    const stop = this.#terminate(run).then(
       () => {
         if (this.#current === run) {
           this.#current = undefined
           this.#state = 'idle'
         }
-        if (startFailure !== undefined) this.#settleStart(run, startFailure)
-        this.#options.logger.log('harness-stopped')
+        if (run.startFailure !== undefined) this.#settleStart(run, run.startFailure)
+        this.#log('harness-stopped')
       },
       (error: unknown) => {
-        if (this.#current === run) {
-          this.#current = undefined
-          this.#state = 'idle'
-        }
         const stopError = asError(error, 'Unable to stop Harness process')
-        if (startFailure !== undefined) this.#settleStart(run, startFailure)
-        this.#options.logger.log('harness-stop-failed', { message: stopError.message })
+        if (run.startFailure !== undefined) this.#settleStart(run, run.startFailure)
+        this.#log('harness-stop-failed', { message: stopError.message })
+        run.stop = undefined
         throw stopError
       },
     )
+    run.stop = stop
+    void stop.catch(() => {})
   }
 
   async #terminate(run: RunningHarness): Promise<void> {
-    if (run.child.exitCode !== null || run.child.signalCode !== null) return
+    if (!this.#isProcessGroupAlive(run)) return
 
     this.#signalGroup(run, 'SIGTERM')
-    if (await waitFor(run.done, this.#options.shutdownTimeoutMs)) return
+    if (await this.#waitForProcessGroupExit(run, this.#options.shutdownTimeoutMs)) return
 
     this.#signalGroup(run, 'SIGKILL')
-    await run.done
+    while (!await this.#waitForProcessGroupExit(run, this.#options.shutdownTimeoutMs)) {
+      this.#signalGroup(run, 'SIGKILL')
+    }
   }
 
   #signalGroup(run: RunningHarness, signal: NodeJS.Signals): void {
@@ -266,11 +261,35 @@ export class HarnessProcessController {
 
     try {
       this.#killProcessGroup(-pid, signal)
-      this.#options.logger.log('harness-signal', { pid: -pid, signal })
+      this.#log('harness-signal', { pid: -pid, signal })
     } catch (error) {
       const systemError = error as NodeJS.ErrnoException
       if (systemError.code !== 'ESRCH') throw error
     }
+  }
+
+  #isProcessGroupAlive(run: RunningHarness): boolean {
+    const { pid } = run.child
+    if (pid === undefined) return false
+
+    try {
+      process.kill(-pid, 0)
+      return true
+    } catch (error) {
+      const systemError = error as NodeJS.ErrnoException
+      if (systemError.code === 'ESRCH') return false
+      if (systemError.code === 'EPERM') return true
+      throw error
+    }
+  }
+
+  async #waitForProcessGroupExit(run: RunningHarness, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    while (this.#isProcessGroupAlive(run)) {
+      if (Date.now() >= deadline) return false
+      await delay(5)
+    }
+    return true
   }
 
   #settleStart(run: RunningHarness, result: Error | URL): void {
@@ -290,8 +309,16 @@ export class HarnessProcessController {
       try {
         listener(error)
       } catch {
-        this.#options.logger.log('harness-unexpected-exit-listener-failed')
+        this.#log('harness-unexpected-exit-listener-failed')
       }
+    }
+  }
+
+  #log(event: string, metadata: Record<string, string | number | boolean | null> = {}): void {
+    try {
+      this.#options.logger.log(event, metadata)
+    } catch {
+      // Logging is observational and must not interrupt child-process ownership.
     }
   }
 }
@@ -338,12 +365,6 @@ function describeExit(prefix: string, code: number | null, signal: NodeJS.Signal
  * @param timeoutMs Maximum wait duration in milliseconds.
  * @returns Whether the completion signal settled before the timeout.
  */
-async function waitFor(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), timeoutMs)
-    void promise.then(() => {
-      clearTimeout(timer)
-      resolve(true)
-    })
-  })
+async function delay(timeoutMs: number): Promise<void> {
+  await new Promise<void>(resolve => setTimeout(resolve, timeoutMs))
 }
