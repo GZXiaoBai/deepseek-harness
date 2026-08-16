@@ -101,6 +101,24 @@ describe('HarnessProcessController', () => {
     expect(kills.map(([, signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL'])
   })
 
+  it('preserves the startup timeout when it aborts a pending health check', async () => {
+    const healthCheckStarted = Promise.withResolvers<undefined>()
+    const { controller } = await createController(['normal'], {
+      startupTimeoutMs: 100,
+      healthCheck: async (_url, signal) => {
+        healthCheckStarted.resolve()
+        await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('health check aborted')), { once: true })
+        })
+      },
+    })
+
+    const starting = controller.start()
+    await healthCheckStarted.promise
+
+    await expect(starting).rejects.toThrow('Harness startup timed out after 100ms')
+  })
+
   it('does not let retry start until a failed attempt has reaped its process group', async () => {
     let healthAttempts = 0
     const { controller, children, kills } = await createController(['ignore-term', 'normal'], {
