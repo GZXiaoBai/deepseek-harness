@@ -27,7 +27,7 @@ DeepSeek Harness 目前通过 Host/Web 组合提供浏览器界面。希望获�
 - 桌面包发布 Electron 主进程输出、准备后的运行时和打包后的应用文件。
 - 桌面启动器通过 loopback HTTP 打开现有 Host/Web 应用。
 - `@deepseek-ai/dsh-host-webserver` 仍是应用 HTTP 服务和浏览器可见启动行为的责任方。
-- 首个版本仅面向 Apple Silicon macOS。
+- 首个版本面向 macOS 14 或更高版本上的 `darwin-arm64`，打包会拒绝其他所有目标。
 
 ## 风险
 

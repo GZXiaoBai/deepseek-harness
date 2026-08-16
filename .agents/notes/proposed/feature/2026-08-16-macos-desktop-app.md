@@ -27,7 +27,7 @@ A future `file://` application with an IPC-backed host is a separate architectur
 - The desktop package publishes its Electron main-process output, staged runtime, and packaged application files.
 - The desktop launcher opens the existing Host/Web application over loopback HTTP.
 - `@deepseek-ai/dsh-host-webserver` remains the owner of application HTTP serving and browser-facing startup behavior.
-- The first release targets Apple Silicon macOS only.
+- The first release targets `darwin-arm64` on macOS 14 or later, and packaging rejects every other target.
 
 ## Risks
 
