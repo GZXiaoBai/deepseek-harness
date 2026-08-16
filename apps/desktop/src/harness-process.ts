@@ -209,7 +209,7 @@ export class HarnessProcessController {
   #failStart(run: RunningHarness, error: Error): void {
     if (this.#current !== run || run.startSettled) return
 
-    run.startFailure = error
+    run.startFailure ??= error
     this.#log('harness-start-failed', { message: error.message })
     this.#beginStop(run)
   }
