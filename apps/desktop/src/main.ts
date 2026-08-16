@@ -53,6 +53,14 @@ export interface TopLevelNavigationEvents {
   on(event: 'will-navigate' | 'will-redirect', listener: (event: ShutdownEvent, url: string) => void): void
 }
 
+/** Process signals that initiate graceful desktop shutdown. */
+export type TerminationSignal = 'SIGTERM' | 'SIGINT'
+
+/** Persistent signal listener registration used by desktop shutdown. */
+export interface TerminationSignalSource {
+  on(signal: TerminationSignal, listener: () => void): void
+}
+
 /** Native startup-failure choices exposed by the Electron adapter. */
 export type StartupFailureAction = 'retry' | 'open-logs' | 'quit'
 
@@ -109,6 +117,20 @@ export function installTopLevelNavigationGuard(
   events.on('will-redirect', guard)
 }
 
+/**
+ * Keeps every termination signal routed through the application's shutdown barrier.
+ *
+ * @param source Persistent signal registration source.
+ * @param listener Shared shutdown request callback.
+ */
+export function installTerminationSignalHandlers(
+  source: TerminationSignalSource,
+  listener: () => void,
+): void {
+  source.on('SIGTERM', listener)
+  source.on('SIGINT', listener)
+}
+
 /** Coordinates one Electron window and one owned Harness process. */
 export class ApplicationController {
   readonly #adapter: DesktopAdapter
@@ -150,7 +172,9 @@ export class ApplicationController {
     this.#installMenu()
 
     await this.#adapter.whenReady()
+    if (this.#isShuttingDown()) return
     const bounds = await loadWindowBounds(this.#windowStatePath, this.#adapter.getDisplayBounds())
+    if (this.#isShuttingDown()) return
     const window = this.#adapter.createWindow({
       bounds,
       minWidth: 900,
@@ -164,6 +188,7 @@ export class ApplicationController {
     this.#window = window
     this.#installWindowHandlers(window)
     await window.loadFile(this.#startupDocument)
+    if (this.#isShuttingDown()) return
     window.show()
     if (this.#focusPending) this.#focusWindow()
     await this.#startHarnessWithRecovery()
@@ -238,6 +263,7 @@ export class ApplicationController {
   }
 
   async #startHarnessWithRecovery(): Promise<void> {
+    if (this.#isShuttingDown()) return
     try {
       const url = await this.#harness.start()
       if (this.#shutdown !== undefined) return
@@ -484,8 +510,7 @@ class ElectronAdapter implements DesktopAdapter {
   }
 
   onTerminationSignal(listener: () => void): void {
-    process.once('SIGTERM', listener)
-    process.once('SIGINT', listener)
+    installTerminationSignalHandlers(process, listener)
   }
 
   openExternal(url: string): void {
