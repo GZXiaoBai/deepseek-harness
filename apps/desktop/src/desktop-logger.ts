@@ -4,8 +4,19 @@ import { join } from 'node:path'
 /** Values that may be safely included in a desktop log entry. */
 export type DesktopLogValue = boolean | number | string | null
 
+/** Destination for safe scalar desktop lifecycle log entries. */
+export interface DesktopLogSink {
+  /**
+   * Records one lifecycle event with safe scalar metadata.
+   *
+   * @param event A stable event name owned by the desktop application.
+   * @param metadata Safe scalar fields associated with the event.
+   */
+  log(event: string, metadata?: Record<string, DesktopLogValue>): void
+}
+
 /** Newline-delimited log writer for desktop lifecycle events. */
-export class DesktopLogger {
+export class DesktopLogger implements DesktopLogSink {
   readonly #path: string
 
   /**

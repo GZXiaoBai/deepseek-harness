@@ -2,10 +2,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DesktopLogger } from '../src/desktop-logger.ts'
-import { HarnessProcessController, type HarnessProcessOptions } from '../src/harness-process.ts'
+import { HarnessProcessController, type HarnessProcessOptions, type HarnessProcessSpawner } from '../src/harness-process.ts'
 
 const fixturePath = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url))
 const userDataDirectories: string[] = []
@@ -37,13 +37,14 @@ async function createController(
   const kills: Array<[number, NodeJS.Signals]> = []
   const children: ChildProcess[] = []
   let spawnCount = 0
-  const spawnProcess = ((command: string, args: readonly string[], options: SpawnOptions) => {
+  const spawnProcess: HarnessProcessSpawner = (command, args, options) => {
     const mode = modes[spawnCount++]
+    if (mode === undefined) throw new Error('Expected a fixture mode for every spawned child')
     const child = spawn(command, [...args, '--mode', mode], options)
     children.push(child)
     if (child.pid !== undefined) processGroups.push(child.pid)
     return child
-  }) as typeof spawn
+  }
 
   return {
     controller: new HarnessProcessController({
@@ -106,9 +107,11 @@ describe('HarnessProcessController', () => {
     const { controller } = await createController(['normal'], {
       startupTimeoutMs: 100,
       healthCheck: async (_url, signal) => {
-        healthCheckStarted.resolve()
+        healthCheckStarted.resolve(undefined)
         await new Promise<never>((_resolve, reject) => {
-          signal.addEventListener('abort', () => reject(new Error('health check aborted')), { once: true })
+          signal.addEventListener('abort', () => {
+            reject(new Error('health check aborted'))
+          }, { once: true })
         })
       },
     })
@@ -198,10 +201,12 @@ describe('HarnessProcessController', () => {
   })
 
   it('contains logger failures while starting, stopping, and reporting an unexpected exit', async () => {
-    const throwingLogger = { log: () => { throw new Error('disk unavailable') } } as DesktopLogger
+    const throwingLogger = { log: () => { throw new Error('disk unavailable') } }
     const { controller, children } = await createController(['normal', 'exit-later'], { logger: throwingLogger })
     const exit = Promise.withResolvers<Error>()
-    controller.onUnexpectedExit(error => exit.resolve(error))
+    controller.onUnexpectedExit((error) => {
+      exit.resolve(error)
+    })
 
     await expect(controller.start()).resolves.toMatchObject({ hostname: '127.0.0.1' })
     await expect(controller.stop()).resolves.toBeUndefined()
@@ -214,7 +219,9 @@ describe('HarnessProcessController', () => {
   it('reports an unexpected runtime exit after readiness', async () => {
     const { controller } = await createController(['exit-later'])
     const exit = Promise.withResolvers<Error>()
-    controller.onUnexpectedExit(error => exit.resolve(error))
+    controller.onUnexpectedExit((error) => {
+      exit.resolve(error)
+    })
 
     await controller.start()
 
