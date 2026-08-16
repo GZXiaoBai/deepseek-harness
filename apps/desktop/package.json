@@ -1,0 +1,40 @@
+{
+  "name": "@deepseek-ai/dsh-desktop",
+  "version": "0.1.0-rc.5",
+  "description": "Apple Silicon macOS desktop wrapper for DeepSeek Harness",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "apps/desktop"
+  },
+  "type": "module",
+  "main": "lib/main.js",
+  "files": [
+    "lib/*.js",
+    "static",
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsdown --config tsdown.config.ts",
+    "test": "vitest run tests",
+    "stage": "node scripts/stage-runtime.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "shell-path": "3.1.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "4.2.0",
+    "@types/node": "^22.20.0",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "sharp": "^0.35.3",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
