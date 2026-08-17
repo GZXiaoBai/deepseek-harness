@@ -2,7 +2,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, w
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
@@ -229,6 +229,8 @@ describe('desktop package configuration', () => {
   it('runs the native Windows icon, staging, runtime verification, and unsigned x64 builder commands', async () => {
     const packageModule = await loadPackageModule()
     const pnpmEntrypoint = '/pnpm.cjs'
+    const checkoutRoot = resolve('/checkout')
+    const checkoutDesktop = join(checkoutRoot, 'apps/desktop')
     const plan = packageModule.createPackagePlan({
       repoRoot: '/checkout',
       platform: 'win32',
@@ -239,18 +241,18 @@ describe('desktop package configuration', () => {
     expect(plan.commands).toEqual([
       {
         executable: process.execPath,
-        args: ['/checkout/apps/desktop/scripts/build-icon.mjs'],
-        cwd: '/checkout',
+        args: [join(checkoutDesktop, 'scripts/build-icon.mjs')],
+        cwd: checkoutRoot,
       },
       {
         executable: process.execPath,
-        args: ['/checkout/apps/desktop/scripts/stage-runtime.mjs'],
-        cwd: '/checkout',
+        args: [join(checkoutDesktop, 'scripts/stage-runtime.mjs')],
+        cwd: checkoutRoot,
       },
       {
         executable: process.execPath,
-        args: ['/checkout/apps/desktop/scripts/verify-runtime.mjs'],
-        cwd: '/checkout',
+        args: [join(checkoutDesktop, 'scripts/verify-runtime.mjs')],
+        cwd: checkoutRoot,
       },
       {
         executable: process.execPath,
@@ -259,13 +261,13 @@ describe('desktop package configuration', () => {
           'exec',
           'electron-builder',
           '--config',
-          '/checkout/apps/desktop/electron-builder.yml',
+          join(checkoutDesktop, 'electron-builder.yml'),
           '--win',
           '--x64',
           '--publish',
           'never',
         ],
-        cwd: '/checkout/apps/desktop',
+        cwd: checkoutDesktop,
         environment: {
           CSC_IDENTITY_AUTO_DISCOVERY: 'false',
           CSC_KEY_PASSWORD: '',
@@ -279,26 +281,28 @@ describe('desktop package configuration', () => {
 
   it('runs only the deterministic icon, staging, runtime verification, and arm64 builder commands', async () => {
     const packageModule = await loadPackageModule()
+    const checkoutRoot = resolve('/checkout')
+    const checkoutDesktop = join(checkoutRoot, 'apps/desktop')
     const plan = packageModule.createPackagePlan({ repoRoot: '/checkout', platform: 'darwin', arch: 'arm64' })
 
     expect(plan).toEqual({
-      repoRoot: '/checkout',
-      releaseDirectory: '/checkout/apps/desktop/release',
+      repoRoot: checkoutRoot,
+      releaseDirectory: join(checkoutDesktop, 'release'),
       commands: [
         {
           executable: process.execPath,
-          args: ['/checkout/apps/desktop/scripts/build-icon.mjs'],
-          cwd: '/checkout',
+          args: [join(checkoutDesktop, 'scripts/build-icon.mjs')],
+          cwd: checkoutRoot,
         },
         {
           executable: process.execPath,
-          args: ['/checkout/apps/desktop/scripts/stage-runtime.mjs'],
-          cwd: '/checkout',
+          args: [join(checkoutDesktop, 'scripts/stage-runtime.mjs')],
+          cwd: checkoutRoot,
         },
         {
           executable: process.execPath,
-          args: ['/checkout/apps/desktop/scripts/verify-runtime.mjs'],
-          cwd: '/checkout',
+          args: [join(checkoutDesktop, 'scripts/verify-runtime.mjs')],
+          cwd: checkoutRoot,
         },
         {
           executable: 'pnpm',
@@ -306,13 +310,13 @@ describe('desktop package configuration', () => {
             'exec',
             'electron-builder',
             '--config',
-            '/checkout/apps/desktop/electron-builder.yml',
+            join(checkoutDesktop, 'electron-builder.yml'),
             '--mac',
             '--arm64',
             '--publish',
             'never',
           ],
-          cwd: '/checkout/apps/desktop',
+          cwd: checkoutDesktop,
           environment: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
         },
       ],
