@@ -125,7 +125,7 @@ export class HarnessProcessController {
     }
     this.#current = run
     this.#state = 'starting'
-    this.#log('harness-starting')
+    this.#log('harness-starting', { pid: child.pid ?? null })
 
     child.once('error', (error) => {
       this.#failStart(run, asError(error, 'Unable to start Harness process'))

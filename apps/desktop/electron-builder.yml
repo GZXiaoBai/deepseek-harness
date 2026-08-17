@@ -1,0 +1,28 @@
+appId: ai.deepseek.harness
+productName: DeepSeek Harness
+asar: true
+files:
+  - lib/*.js
+  - static/**
+afterPack: scripts/after-pack.mjs
+directories:
+  output: release
+  buildResources: build
+artifactName: DeepSeek Harness-${version}-${arch}.${ext}
+publish: null
+mac:
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: dir
+      arch: [arm64]
+  category: public.app-category.developer-tools
+  minimumSystemVersion: '14.0'
+  identity: '-'
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+dmg:
+  sign: false

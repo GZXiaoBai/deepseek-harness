@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,6 +9,7 @@ import {
   installTopLevelNavigationGuard,
   launchDesktopApplication,
   resolveDesktopCliEntry,
+  resolveDesktopDshHome,
   type ApplicationMenu,
   type DesktopAdapter,
   type DesktopWindow,
@@ -256,6 +257,17 @@ async function flush(): Promise<void> {
 }
 
 describe('desktop application controller', () => {
+  it('isolates Harness data below Electron userData without creating it in the main process', async () => {
+    const userDataPath = await mkdtemp(join(tmpdir(), 'dsh-desktop-user-data-'))
+    directories.push(userDataPath)
+
+    const dshHome = resolveDesktopDshHome(userDataPath)
+
+    expect(dshHome).toBe(join(userDataPath, 'Harness'))
+    expect(dshHome).not.toBe(userDataPath)
+    await expect(lstat(dshHome)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('resolves the packaged CLI through the deployed runtime root dependency link', async () => {
     const resourcesPath = await mkdtemp(join(tmpdir(), 'dsh-desktop-resources-'))
     directories.push(resourcesPath)
