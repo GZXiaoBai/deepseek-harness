@@ -12,13 +12,13 @@ Run the production build from the repository root on an Apple Silicon Mac:
 pnpm run package:desktop
 ```
 
-The command rejects non-macOS and non-arm64 hosts. It writes the application to `apps/desktop/release/mac-arm64/DeepSeek Harness.app` and the installer to `apps/desktop/release/DeepSeek Harness-0.1.0-rc.5-arm64.dmg`.
+The command rejects non-macOS and non-arm64 hosts. It writes the application to `apps/desktop/release/mac-arm64/DeepSeek Harness.app` and the installer to `apps/desktop/release/DeepSeek Harness-<version>-arm64.dmg`; `apps/desktop/package.json` is the version source.
 
 ## Install and replace
 
 Quit DeepSeek Harness, open the DMG, and copy `DeepSeek Harness.app` to `/Applications`. To install a newer local build, quit the existing application and replace only `/Applications/DeepSeek Harness.app`; application replacement does not remove data under `~/Library/Application Support/DeepSeek Harness`.
 
-This personal build is ad-hoc signed with Hardened Runtime but is not notarized. A quarantined first launch may be blocked by Gatekeeper. In Finder, Control-click the application and choose **Open**, then confirm **Open**; if macOS instead offers **Open Anyway**, use it under **System Settings > Privacy & Security** after the blocked launch. Do not disable Gatekeeper globally.
+This personal build is ad-hoc signed with Hardened Runtime but is not notarized. A quarantined first launch may be blocked by Gatekeeper. First try to open the application; after macOS blocks it, open **System Settings > Privacy & Security**, click **Open Anyway**, then confirm **Open**. Follow Apple's [Open a Mac app from an unknown developer](https://support.apple.com/guide/mac-help/mh40616/mac) guide for current recovery steps. Do not disable Gatekeeper globally.
 
 The application has no updater. Build and replace it manually when updating.
 
@@ -28,7 +28,7 @@ Electron owns `~/Library/Application Support/DeepSeek Harness`. Window bounds ar
 
 ## Verify
 
-The package verifier requires the release App and DMG, validates bundle containment, arm64 Mach-O files, ad-hoc Hardened Runtime signatures and entitlements, then launches copied and mounted applications outside the repository to verify the existing Web UI, single-instance behavior, data persistence, and backend cleanup.
+The package verifier fully validates the release App, copies it outside the repository, validates the copy again, and launches only that copy. The launch proves the existing Web UI over HTTP, second-instance handoff without a replacement backend, Harness subtree and Web-profile initialization isolated from Electron userData, and backend process-group plus TCP-port cleanup. It separately mounts the DMG and revalidates the mounted App's bundle containment, arm64 Mach-O files, ad-hoc Hardened Runtime signatures, and entitlements without launching it.
 
 ```sh
 pnpm run test:desktop

@@ -16,7 +16,7 @@ A `file://` application with an IPC-backed host remains a separate architecture.
 
 ## Security and runtime boundaries
 
-The renderer has context isolation and sandboxing enabled, with Node integration disabled and no preload API. Top-level content stays on the confirmed `http://127.0.0.1:<ephemeral-port>` origin: same-origin navigation is allowed, other HTTP and HTTPS destinations open externally, and unsafe or malformed schemes are denied. The login shell contributes only `PATH`; its other environment values are neither imported nor logged.
+The renderer has context isolation and sandboxing enabled, with Node integration disabled and no preload API. The exact bundled, script-free startup and error documents are the only `file://` top-level exceptions. Harness content stays on the confirmed `http://127.0.0.1:<ephemeral-port>` origin: same-origin navigation is allowed, other HTTP and HTTPS destinations open externally, and every other scheme or malformed URL is denied. The login shell contributes only `PATH`; its other environment values are neither imported nor logged.
 
 The Desktop app owns only the detached process group it creates. Quit, retry, application signals, and unexpected exits share one shutdown barrier: the owned group receives `SIGTERM`, gets five seconds to exit, then receives `SIGKILL` if necessary. The application neither discovers nor signals unrelated Harness processes.
 
@@ -30,7 +30,7 @@ The application enforces one Electron instance and one backend. A second launch 
 
 ## Verification
 
-Behavior tests pin URL parsing and navigation, renderer preferences, single-instance startup, retry, process-group ownership, shutdown races, data-root separation, runtime closure, staging containment, arm64 binaries, and package configuration. Real package acceptance launches an App copied outside the repository and the App mounted from the DMG; it verifies the existing Web UI over HTTP, unchanged backend identity after a second launch, persisted Harness data, closed TCP port and process group after quit, bundle containment, and every code object's signature and entitlements.
+Behavior tests pin URL parsing and navigation, renderer preferences, single-instance startup, retry, process-group ownership, shutdown races, data-root separation, runtime closure, staging containment, arm64 binaries, and package configuration. Real package acceptance fully validates the release App, copies it outside the repository, revalidates the copy, and launches only that copy. The launch verifies the existing Web UI over HTTP, unchanged backend identity after a second launch, Harness subtree and Web-profile initialization isolated from Electron userData, and the closed TCP port and process group after quit. The mounted DMG App receives the complete static bundle-containment, arm64, signature, and entitlement validation but is not launched.
 
 ## Alternatives considered
 

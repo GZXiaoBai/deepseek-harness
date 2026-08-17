@@ -16,7 +16,7 @@ DeepSeek Harness 通过 Host/Web 组合提供浏览器界面。希望获得应�
 
 ## 安全与运行时边界
 
-渲染器启用上下文隔离和沙箱，禁用 Node 集成，也没有 preload API。顶层内容仅限已确认的 `http://127.0.0.1:<ephemeral-port>` 来源：允许同源导航，其他 HTTP 和 HTTPS 目标在外部打开，不安全或格式错误的 scheme 会被拒绝。登录 shell 只提供 `PATH`；它的其他环境值既不导入，也不记录。
+渲染器启用上下文隔离和沙箱，禁用 Node 集成，也没有 preload API。仅精确的随包无脚本启动文档和错误文档是 `file://` 顶层例外。Harness 内容仅限已确认的 `http://127.0.0.1:<ephemeral-port>` 来源：允许同源导航，其他 HTTP 和 HTTPS 目标在外部打开，其他所有 scheme 或格式错误的 URL 都会被拒绝。登录 shell 只提供 `PATH`；它的其他环境值既不导入，也不记录。
 
 Desktop 应用只拥有自己创建的分离式进程组。退出、重试、应用信号和意外退出共用一个关闭屏障：所拥有的进程组先收到 `SIGTERM`，可在 5 秒内退出，否则会收到 `SIGKILL`。应用既不发现，也不向无关 Harness 进程发送信号。
 
@@ -30,7 +30,7 @@ Electron 拥有 `~/Library/Application Support/DeepSeek Harness`，包括 `windo
 
 ## 验证
 
-行为测试固定了 URL 解析与导航、渲染器偏好、单实例启动、重试、进程组所有权、关闭竞态、数据根目录分离、运行时闭包、暂存包含性、arm64 二进制文件和打包配置。真实打包验收会启动复制到仓库外的 App 以及从 DMG 挂载的 App；它会验证通过 HTTP 提供的现有 Web UI、第二次启动后不变的后端身份、已持久化的 Harness 数据、退出后关闭的 TCP 端口与进程组、应用包包含性，以及每个代码对象的签名和 entitlements。
+行为测试固定了 URL 解析与导航、渲染器偏好、单实例启动、重试、进程组所有权、关闭竞态、数据根目录分离、运行时闭包、暂存包含性、arm64 二进制文件和打包配置。真实打包验收会全面验证发布 App，将它复制到仓库外，重新验证该副本，并仅启动这个副本。该启动会验证通过 HTTP 提供的现有 Web UI、第二次启动后不变的后端身份、Harness 子树与 Web profile 已初始化并与 Electron userData 隔离，以及退出后已关闭的 TCP 端口和进程组。已挂载的 DMG App 会接受完整的静态应用包包含性、arm64、签名和 entitlements 验证，但不会被启动。
 
 ## 曾考虑的替代方案
 

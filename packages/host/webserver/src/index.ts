@@ -4,9 +4,9 @@
  * index transform taps, and the single fallback seat for everything no route
  * claims). Knows no harness concepts and serves no files; the composing
  * application's frontend plugin owns dist serving through the fallback hook.
- * Browsers and the first macOS Desktop wrapper use this HTTP carrier. A future
- * file:// plus IPC host is a distinct transport rather than an alias for it.
- * This package never prints: the URL line belongs to the shell.
+ * Browsers use this carrier directly; the first macOS Desktop wrapper uses it
+ * at `http://127.0.0.1:<ephemeral-port>`. A future `file://` plus IPC host is a
+ * separate architecture rather than an alias. The URL line belongs to the shell.
  */
 
 import { createServer } from 'node:http'
