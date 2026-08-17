@@ -269,8 +269,7 @@ export class ApplicationController {
     })
     this.#window = window
     this.#installWindowHandlers(window)
-    await window.loadFile(this.#startupDocument)
-    if (this.#isShuttingDown()) return
+    if (!await this.#loadWindowDocument(this.#startupDocument)) return
     window.show()
     if (this.#focusPending) this.#focusWindow()
     await this.#startHarnessWithRecovery()
@@ -381,7 +380,7 @@ export class ApplicationController {
   async #showFailure(error: Error): Promise<void> {
     if (this.#shutdown !== undefined) return
     this.#harnessOrigin = undefined
-    await this.#window?.loadFile(this.#errorDocument)
+    if (!await this.#loadWindowDocument(this.#errorDocument)) return
 
     for (;;) {
       if (this.#isShuttingDown()) return
@@ -397,10 +396,34 @@ export class ApplicationController {
 
       await this.#harness.stop()
       if (this.#isShuttingDown()) return
-      await this.#window?.loadFile(this.#startupDocument)
+      if (!await this.#loadWindowDocument(this.#startupDocument)) return
       await this.#startHarnessWithRecovery()
       return
     }
+  }
+
+  async #loadWindowDocument(path: string): Promise<boolean> {
+    if (this.#isShuttingDown()) return false
+    const window = this.#window
+    if (window === undefined || window.isDestroyed()) {
+      this.#beginShutdown()
+      return false
+    }
+    try {
+      await window.loadFile(path)
+    } catch (error) {
+      if (this.#isShuttingDown()) return false
+      if (
+        this.#window !== window
+        || window.isDestroyed()
+        || isDestroyedDesktopWindowError(error)
+      ) {
+        this.#beginShutdown()
+        return false
+      }
+      throw error
+    }
+    return !this.#isShuttingDown()
   }
 
   #allowTopLevelNavigation(rawUrl: string): boolean {
