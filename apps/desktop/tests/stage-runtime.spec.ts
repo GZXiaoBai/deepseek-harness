@@ -51,7 +51,7 @@ async function makeRepository(): Promise<string> {
 async function createRuntimeClosure(
   runtimeDirectory: string,
   options: { cli?: boolean; frontend?: boolean } = {},
-): Promise<void> {
+): Promise<string> {
   await mkdir(runtimeDirectory, { recursive: true })
   await writeFile(join(runtimeDirectory, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-desktop-runtime' }))
   const dsh = join(
@@ -71,7 +71,7 @@ async function createRuntimeClosure(
   const nativePrebuild = join(runtimeDirectory, 'node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/prebuilds/darwin-arm64')
   await mkdir(nativePrebuild, { recursive: true })
   await writeFile(join(nativePrebuild, 'pty.node'), '')
-  await createRepairScript(runtimeDirectory)
+  return await createRepairScript(runtimeDirectory)
 }
 
 async function createWebClosure(runtimeDirectory: string, dsh: string): Promise<void> {
@@ -163,6 +163,7 @@ describe('desktop runtime staging', () => {
         args: [
           '--config.inject-workspace-packages=true',
           '--ignore-scripts',
+          '--frozen-lockfile',
           '--filter',
           '@deepseek-ai/dsh-desktop-runtime',
           '--prod',
@@ -312,5 +313,30 @@ describe('desktop runtime staging', () => {
         await symlink(externalFile, join(runtimeDirectory, 'node_modules/external-dependency'))
       },
     })).rejects.toThrow(`Staged symlink resolves outside the runtime: ${join(runtimeDirectory, 'node_modules/external-dependency')}`)
+  })
+
+  it('rejects an external repair-script symlink before executing staged code', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    const externalDirectory = await mkdtemp(join(tmpdir(), 'dsh-stage-repair-external-'))
+    directories.push(externalDirectory)
+    const externalScript = join(externalDirectory, 'ensure-spawn-helper.mjs')
+    await writeFile(externalScript, '')
+    const { createStagePlan, executeStagePlan } = await loadStageRuntime()
+    const plan = createStagePlan({ repoRoot, platform: 'darwin', arch: 'arm64', electronVersion: '43.4.0' })
+    let repairExecuted = false
+
+    await expect(executeStagePlan(plan, {
+      runCommand: async (command) => {
+        if (command.args.includes('deploy')) {
+          const repairScript = await createRuntimeClosure(runtimeDirectory)
+          await rm(repairScript)
+          await symlink(externalScript, repairScript)
+          return
+        }
+        if (command.executable === process.execPath) repairExecuted = true
+      },
+    })).rejects.toThrow('Staged symlink resolves outside the runtime')
+    expect(repairExecuted).toBe(false)
   })
 })

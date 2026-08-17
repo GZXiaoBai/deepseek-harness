@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertRuntimeSymlinksContained, resolveCliEntryPath, resolveWebFrontendIndex } from './stage-runtime.mjs'
-import { terminateOwnedProcessGroup } from './process-group.mjs'
+import { requireClosedTcpPort, terminateOwnedProcessGroup } from './process-group.mjs'
 
 const STARTUP_TIMEOUT_MS = 15_000
 const runtimeDirectory = fileURLToPath(new URL('../.runtime/', import.meta.url))
@@ -160,19 +160,8 @@ async function runWebSmoke(dshHome) {
       exit,
       leaderExited: () => child.exitCode !== null || child.signalCode !== null,
     })
-    if (url !== undefined) await requireClosedPort(url)
+    if (url !== undefined) await requireClosedTcpPort(url)
   }
-}
-
-/** @param {URL} url */
-async function requireClosedPort(url) {
-  try {
-    await fetch(url, { signal: AbortSignal.timeout(1_000) })
-  } catch (connectionError) {
-    void connectionError
-    return
-  }
-  throw new Error(`Owned Web process group stopped but its port remains open: ${url.href}`)
 }
 
 /** @param {readonly string[]} args @param {string} dshHome */
