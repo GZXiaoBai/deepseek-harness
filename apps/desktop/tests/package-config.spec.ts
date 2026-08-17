@@ -99,6 +99,7 @@ async function loadAfterPackModule(): Promise<AfterPackModule> {
 interface BuilderConfig {
   appId?: string
   productName?: string
+  electronDist?: string
   asar?: boolean
   files?: string[]
   extraResources?: Array<{ from?: string; to?: string }>
@@ -158,6 +159,7 @@ describe('desktop package configuration', () => {
     expect(config).toMatchObject({
       appId: 'ai.deepseek.harness',
       productName: 'DeepSeek Harness',
+      electronDist: 'node_modules/electron/dist',
       asar: true,
       files: ['lib/*.js', 'static/**'],
       afterPack: 'scripts/after-pack.mjs',

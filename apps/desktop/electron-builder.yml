@@ -1,5 +1,6 @@
 appId: ai.deepseek.harness
 productName: DeepSeek Harness
+electronDist: node_modules/electron/dist
 asar: true
 files:
   - lib/*.js
