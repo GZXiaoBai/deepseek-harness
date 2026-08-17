@@ -26,7 +26,7 @@ The packaged backend uses the private, verified dependency deployment described 
 
 Electron owns `~/Library/Application Support/DeepSeek Harness`, including `window-state.json`, `Logs/desktop.log`, and its singleton files. The backend receives `DSH_HOME` as the separate `Harness/` subtree so Harness file watchers never observe Electron's singleton socket. Replacing the App leaves both Desktop and Harness data intact.
 
-The application enforces one Electron instance and one backend. A second launch focuses the existing window without starting another backend. Recoverable startup failure stays in a script-free local document and offers retry, log-directory access, or quit. A fatal initialization or controller-start failure is reported before cleanup; an existing controller is shut down before Electron exits with status 1. Cleanup failure is reported separately and cannot replace the startup diagnostic or leave the primary instance holding the single-instance lock.
+The application enforces one Electron instance and one backend. A second launch focuses the existing window without starting another backend. Recoverable startup failure stays in a script-free local document and offers retry, log-directory access, or quit. The original fatal initialization or controller-start failure is recorded first; when a controller exists, the application attempts and awaits its shutdown. Cleanup failure is reported separately and means backend termination is not guaranteed. Electron still exits with status 1 and releases the single-instance lock.
 
 ## Verification
 
