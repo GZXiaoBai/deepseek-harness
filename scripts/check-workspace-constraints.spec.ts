@@ -23,6 +23,22 @@ function runConstraints() {
 }
 
 describe('workspace constraints', () => {
+  it('keeps the reviewed relative internal postinstall rule without widening denied builds', () => {
+    const result = spawnSync('pnpm', ['config', 'get', 'allow-builds', '--json'], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+    })
+    const output = `${result.stdout}${result.stderr}`
+
+    expect(result.error).toBeUndefined()
+    expect(result.status, output).toBe(0)
+    const allowBuilds = JSON.parse(result.stdout) as Record<string, boolean>
+    expect(allowBuilds['@deepseek-ai/dsh-subprocess-local']).toBeUndefined()
+    expect(allowBuilds['@deepseek-ai/dsh-subprocess-local@file:packages/subprocess/subprocess-local']).toBe(true)
+    expect(allowBuilds['@google/genai']).toBe(false)
+    expect(allowBuilds.protobufjs).toBe(false)
+  })
+
   it('allows the reviewed desktop publication payload', () => {
     const directory = join(repositoryRoot, 'apps', `desktop-policy-${randomUUID()}`)
     fixtureDirectories.push(directory)

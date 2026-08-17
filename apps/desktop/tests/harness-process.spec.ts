@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DesktopLogger } from '../src/desktop-logger.ts'
 import { HarnessProcessController, type HarnessProcessOptions, type HarnessProcessSpawner } from '../src/harness-process.ts'
@@ -26,6 +27,7 @@ interface ControllerSetup {
   controller: HarnessProcessController
   kills: Array<[number, NodeJS.Signals]>
   children: ChildProcess[]
+  spawns: Array<{ executable: string; args: readonly string[]; options: import('node:child_process').SpawnOptions }>
 }
 
 async function createController(
@@ -36,8 +38,10 @@ async function createController(
   userDataDirectories.push(userData)
   const kills: Array<[number, NodeJS.Signals]> = []
   const children: ChildProcess[] = []
+  const spawns: ControllerSetup['spawns'] = []
   let spawnCount = 0
   const spawnProcess: HarnessProcessSpawner = (command, args, options) => {
+    spawns.push({ executable: command, args, options })
     const mode = modes[spawnCount++]
     if (mode === undefined) throw new Error('Expected a fixture mode for every spawned child')
     const child = spawn(command, [...args, '--mode', mode], options)
@@ -64,15 +68,53 @@ async function createController(
     }),
     kills,
     children,
+    spawns,
   }
 }
 
 describe('HarnessProcessController', () => {
+  it('adds exposed internals only to an Electron Node-mode backend child', async () => {
+    const require = createRequire(import.meta.url)
+    const electronExecutable = require('electron') as string
+    const electron = await createController(['internals-ready'], {
+      executable: electronExecutable,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    })
+
+    await expect(electron.controller.start()).resolves.toMatchObject({ hostname: '127.0.0.1' })
+    expect(electron.spawns[0]).toMatchObject({
+      executable: electronExecutable,
+      args: [
+        '--expose-internals',
+        fixturePath,
+        'web',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '0',
+      ],
+    })
+    await electron.controller.stop()
+
+    const plainNode = await createController(['normal'])
+    await plainNode.controller.start()
+    expect(plainNode.spawns[0]?.args).toEqual([
+      fixturePath,
+      'web',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '0',
+    ])
+    await plainNode.controller.stop()
+  })
+
   it('waits for a delayed strict URL before accepting the harness as ready', async () => {
     const { controller } = await createController(['delayed-ready'])
     const startedAt = Date.now()
 
-    await expect(controller.start()).resolves.toMatchObject({ href: expect.stringMatching(/^http:\/\/127\.0\.0\.1:/) })
+    const url = await controller.start()
+    expect(url.href).toMatch(/^http:\/\/127\.0\.0\.1:/)
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(45)
 
     await controller.stop()
@@ -213,7 +255,7 @@ describe('HarnessProcessController', () => {
     expect(children[0]?.exitCode ?? children[0]?.signalCode).not.toBeNull()
 
     await expect(controller.start()).resolves.toMatchObject({ hostname: '127.0.0.1' })
-    await expect(exit.promise).resolves.toMatchObject({ message: expect.stringContaining('exited unexpectedly') })
+    expect((await exit.promise).message).toContain('exited unexpectedly')
   })
 
   it('reports an unexpected runtime exit after readiness', async () => {
@@ -225,7 +267,7 @@ describe('HarnessProcessController', () => {
 
     await controller.start()
 
-    await expect(exit.promise).resolves.toMatchObject({ message: expect.stringContaining('exited unexpectedly') })
+    expect((await exit.promise).message).toContain('exited unexpectedly')
   })
 
   it('writes line-delimited safe child output metadata to the desktop log', async () => {

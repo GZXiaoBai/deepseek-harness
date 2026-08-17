@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 
 const modeIndex = process.argv.indexOf('--mode')
 const mode = modeIndex === -1 ? 'normal' : process.argv[modeIndex + 1]
@@ -14,6 +15,13 @@ if (process.argv.includes('--ignoring-descendant')) {
   process.stdout.write('Listening on a different format\n')
   setInterval(() => {}, 1_000)
 } else {
+  if (mode === 'internals-ready') {
+    const require = createRequire(import.meta.url)
+    const internalLoader = require('internal/modules/esm/loader').getOrInitializeCascadedLoader()
+    if (!process.execArgv.includes('--expose-internals') || internalLoader === undefined) {
+      throw new Error('Electron backend cannot access the internal ESM loader')
+    }
+  }
   const server = createServer((_request, response) => {
     response.writeHead(200)
     response.end('fake dsh')

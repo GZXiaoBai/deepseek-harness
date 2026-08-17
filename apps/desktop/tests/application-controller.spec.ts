@@ -1,12 +1,14 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ApplicationController,
   installTerminationSignalHandlers,
   installTopLevelNavigationGuard,
   launchDesktopApplication,
+  resolveDesktopCliEntry,
   type ApplicationMenu,
   type DesktopAdapter,
   type DesktopWindow,
@@ -254,6 +256,68 @@ async function flush(): Promise<void> {
 }
 
 describe('desktop application controller', () => {
+  it('resolves the packaged CLI through the deployed runtime root dependency link', async () => {
+    const resourcesPath = await mkdtemp(join(tmpdir(), 'dsh-desktop-resources-'))
+    directories.push(resourcesPath)
+    const cliPath = join(resourcesPath, 'runtime/node_modules/@deepseek-ai/dsh/lib/bin.js')
+    await mkdir(join(cliPath, '..'), { recursive: true })
+    await writeFile(cliPath, '')
+
+    await expect(resolveDesktopCliEntry({
+      isPackaged: true,
+      resourcesPath,
+      moduleUrl: import.meta.url,
+    })).resolves.toEqual({
+      cliPath,
+      cwd: join(resourcesPath, 'runtime'),
+    })
+  })
+
+  it('resolves the unpackaged CLI from the application module location', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-desktop-source-'))
+    directories.push(root)
+    const modulePath = join(root, 'apps/desktop/lib/main.js')
+    const cliPath = join(root, 'apps/cli/lib/bin.js')
+    await mkdir(join(modulePath, '..'), { recursive: true })
+    await mkdir(join(cliPath, '..'), { recursive: true })
+    await writeFile(cliPath, '')
+
+    await expect(resolveDesktopCliEntry({
+      isPackaged: false,
+      resourcesPath: join(root, 'unused-resources'),
+      moduleUrl: pathToFileURL(modulePath).href,
+    })).resolves.toEqual({ cliPath, cwd: root })
+  })
+
+  it('rejects a missing packaged CLI entry', async () => {
+    const resourcesPath = await mkdtemp(join(tmpdir(), 'dsh-desktop-resources-'))
+    directories.push(resourcesPath)
+    await mkdir(join(resourcesPath, 'runtime'), { recursive: true })
+
+    await expect(resolveDesktopCliEntry({
+      isPackaged: true,
+      resourcesPath,
+      moduleUrl: import.meta.url,
+    })).rejects.toThrow('Packaged Harness CLI entry is missing')
+  })
+
+  it('rejects a packaged CLI dependency link that escapes the staged runtime', async () => {
+    const resourcesPath = await mkdtemp(join(tmpdir(), 'dsh-desktop-resources-'))
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-desktop-outside-'))
+    directories.push(resourcesPath, outside)
+    const dependencyLink = join(resourcesPath, 'runtime/node_modules/@deepseek-ai/dsh')
+    await mkdir(join(dependencyLink, '..'), { recursive: true })
+    await mkdir(join(outside, 'lib'), { recursive: true })
+    await writeFile(join(outside, 'lib/bin.js'), '')
+    await symlink(outside, dependencyLink)
+
+    await expect(resolveDesktopCliEntry({
+      isPackaged: true,
+      resourcesPath,
+      moduleUrl: import.meta.url,
+    })).rejects.toThrow('Packaged Harness CLI entry resolves outside the staged runtime')
+  })
+
   it('prevents a disallowed server redirect as top-level navigation', () => {
     const listeners = new Map<string, (event: ShutdownEvent, url: string) => void>()
     installTopLevelNavigationGuard({
