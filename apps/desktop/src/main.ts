@@ -346,24 +346,35 @@ export class ApplicationController {
 
   async #startHarnessWithRecovery(): Promise<void> {
     if (this.#isShuttingDown()) return
+    let url: URL
     try {
-      const url = await this.#harness.start()
-      if (this.#shutdown !== undefined) return
-      const window = this.#window
-      if (window === undefined || window.isDestroyed()) {
-        this.#beginShutdown()
-        return
-      }
-      this.#harnessOrigin = url.origin
+      url = await this.#harness.start()
+    } catch (error) {
+      if (this.#isShuttingDown()) return
+      await this.#showFailure(asError(error, 'Harness failed to start'))
+      return
+    }
+
+    if (this.#isShuttingDown()) return
+    const window = this.#window
+    if (window === undefined || window.isDestroyed()) {
+      this.#beginShutdown()
+      return
+    }
+    this.#harnessOrigin = url.origin
+    try {
       await window.loadUrl(url.href)
     } catch (error) {
-      if (this.#shutdown !== undefined) return
-      const window = this.#window
-      if (window === undefined || window.isDestroyed()) {
+      if (this.#isShuttingDown()) return
+      if (
+        this.#window !== window
+        || window.isDestroyed()
+        || isDestroyedDesktopWindowError(error)
+      ) {
         this.#beginShutdown()
         return
       }
-      await this.#showFailure(asError(error, 'Harness failed to start'))
+      await this.#showFailure(asError(error, 'Harness page failed to load'))
     }
   }
 
@@ -695,6 +706,10 @@ async function runElectronMain(): Promise<void> {
       userDataPath,
     })
   })
+}
+
+function isDestroyedDesktopWindowError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'Object has been destroyed'
 }
 
 function asError(error: unknown, fallback: string): Error {
