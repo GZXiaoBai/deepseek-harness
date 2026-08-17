@@ -1,0 +1,100 @@
+diff --git a/dist/cjs/util.js b/dist/cjs/util.js
+index 77e64b56872bc65bcb0f60ecfbec84eb3da02c6f..cbee263b90bae56e6c047b1404572ec5beb01056 100644
+--- a/dist/cjs/util.js
++++ b/dist/cjs/util.js
+@@ -36,6 +36,9 @@ exports.debugLog = (0, debug_1.default)('electron-osx-sign');
+ exports.debugLog.log = console.log.bind(console);
+ exports.debugWarn = (0, debug_1.default)('electron-osx-sign:warn');
+ exports.debugWarn.log = console.warn.bind(console);
++const binaryInspectionConcurrency = 32;
++let activeBinaryInspections = 0;
++const binaryInspectionWaiters = [];
+ const removePassword = function (input) {
+     return input.replace(/(-P |pass:|\/p|-pass )([^ ]+)/, function (_, p1) {
+         return `${p1}***`;
+@@ -102,10 +105,32 @@ exports.detectElectronPlatform = detectElectronPlatform;
+  * This function returns a promise resolving the file path if file binary.
+  */
+ async function getFilePathIfBinary(filePath) {
+-    if (await (0, isbinaryfile_1.isBinaryFile)(filePath)) {
+-        return filePath;
++    await acquireBinaryInspection();
++    try {
++        if (await (0, isbinaryfile_1.isBinaryFile)(filePath)) {
++            return filePath;
++        }
++        return null;
++    }
++    finally {
++        releaseBinaryInspection();
++    }
++}
++async function acquireBinaryInspection() {
++    if (activeBinaryInspections < binaryInspectionConcurrency) {
++        activeBinaryInspections += 1;
++        return;
++    }
++    await new Promise(resolve => binaryInspectionWaiters.push(resolve));
++}
++function releaseBinaryInspection() {
++    const next = binaryInspectionWaiters.shift();
++    if (next) {
++        next();
++    }
++    else {
++        activeBinaryInspections -= 1;
+     }
+-    return null;
+ }
+ /**
+  * This function returns a promise validating opts.app, the application to be signed or flattened.
+diff --git a/dist/esm/util.js b/dist/esm/util.js
+index d3f66d54b1a88e7410d78affe17de87302db02a3..28ce0fdf5b5ed859035a138fa1111712f4cc164f 100644
+--- a/dist/esm/util.js
++++ b/dist/esm/util.js
+@@ -7,6 +7,9 @@ export const debugLog = debug('electron-osx-sign');
+ debugLog.log = console.log.bind(console);
+ export const debugWarn = debug('electron-osx-sign:warn');
+ debugWarn.log = console.warn.bind(console);
++const binaryInspectionConcurrency = 32;
++let activeBinaryInspections = 0;
++const binaryInspectionWaiters = [];
+ const removePassword = function (input) {
+     return input.replace(/(-P |pass:|\/p|-pass )([^ ]+)/, function (_, p1) {
+         return `${p1}***`;
+@@ -68,10 +71,32 @@ export async function detectElectronPlatform(opts) {
+  * This function returns a promise resolving the file path if file binary.
+  */
+ async function getFilePathIfBinary(filePath) {
+-    if (await isBinaryFile(filePath)) {
+-        return filePath;
++    await acquireBinaryInspection();
++    try {
++        if (await isBinaryFile(filePath)) {
++            return filePath;
++        }
++        return null;
++    }
++    finally {
++        releaseBinaryInspection();
++    }
++}
++async function acquireBinaryInspection() {
++    if (activeBinaryInspections < binaryInspectionConcurrency) {
++        activeBinaryInspections += 1;
++        return;
++    }
++    await new Promise(resolve => binaryInspectionWaiters.push(resolve));
++}
++function releaseBinaryInspection() {
++    const next = binaryInspectionWaiters.shift();
++    if (next) {
++        next();
++    }
++    else {
++        activeBinaryInspections -= 1;
+     }
+-    return null;
+ }
+ /**
+  * This function returns a promise validating opts.app, the application to be signed or flattened.

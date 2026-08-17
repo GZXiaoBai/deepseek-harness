@@ -11,6 +11,7 @@ import { loadWindowBounds, saveWindowBounds, type DisplayBounds, type WindowBoun
 
 const WINDOW_STATE_FILE = 'window-state.json'
 const LOG_DIRECTORY = 'Logs'
+const HARNESS_DATA_DIRECTORY = 'Harness'
 
 /** Browser security settings required for the Harness web renderer. */
 export interface DesktopWebPreferences {
@@ -100,6 +101,16 @@ export interface ApplicationControllerOptions {
 }
 
 export type { ApplicationMenu, ApplicationMenuItem }
+
+/**
+ * Resolves the Harness-owned data root below Electron's application data.
+ *
+ * @param userDataPath Electron's per-user application-data directory.
+ * @returns The separate root created and populated by the Harness backend.
+ */
+export function resolveDesktopDshHome(userDataPath: string): string {
+  return join(userDataPath, HARNESS_DATA_DIRECTORY)
+}
 
 /** Inputs that locate the Harness CLI for an Electron launch. */
 export interface DesktopCliEntryOptions {
@@ -632,7 +643,7 @@ async function runElectronMain(): Promise<void> {
     const harness = new HarnessProcessController({
       executable: process.execPath,
       cliPath,
-      dshHome: userDataPath,
+      dshHome: resolveDesktopDshHome(userDataPath),
       cwd,
       env: environment,
       logger,

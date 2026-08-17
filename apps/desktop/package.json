@@ -22,7 +22,8 @@
     "test": "pnpm --dir ../.. exec vitest run apps/desktop/tests",
     "verify:runtime-closure": "tsx ../../scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json",
     "stage": "node scripts/stage-runtime.mjs",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "license": "MIT",
   "dependencies": {
@@ -36,6 +37,7 @@
     "sharp": "^0.35.3",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "yaml": "^2.9.0"
   }
 }

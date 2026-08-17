@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -25,8 +25,10 @@ interface StageRuntimeModule {
     plan: StagePlan,
     options: {
       runCommand(command: StageCommand): Promise<void>
+      auditRuntime?: (runtimeDirectory: string) => Promise<void>
     },
   ) => Promise<void>
+  pruneUnsupportedNodePtyPrebuild: (runtimeDirectory: string) => Promise<void>
 }
 
 const stageScriptUrl = pathToFileURL(join(import.meta.dirname, '../scripts/stage-runtime.mjs')).href
@@ -68,10 +70,43 @@ async function createRuntimeClosure(
   await mkdir(rootScope, { recursive: true })
   await symlink(dsh, join(rootScope, 'dsh'))
   if (options.frontend !== false) await createWebClosure(runtimeDirectory, dsh)
-  const nativePrebuild = join(runtimeDirectory, 'node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/prebuilds/darwin-arm64')
-  await mkdir(nativePrebuild, { recursive: true })
-  await writeFile(join(nativePrebuild, 'pty.node'), '')
-  return await createRepairScript(runtimeDirectory)
+  return await createNativeClosure(runtimeDirectory, dsh)
+}
+
+async function createNativeClosure(runtimeDirectory: string, dsh: string): Promise<string> {
+  const virtualStore = join(runtimeDirectory, 'node_modules/.pnpm')
+  const base = join(
+    virtualStore,
+    '@deepseek-ai+dsh-base@file++++checkout+with%20space/node_modules/@deepseek-ai/dsh-base',
+  )
+  const subprocessLocal = join(
+    virtualStore,
+    '@deepseek-ai+dsh-subprocess-local@file++++checkout+with%20space/node_modules/@deepseek-ai/dsh-subprocess-local',
+  )
+  const nodePty = join(virtualStore, 'node-pty@1.1.0/node_modules/node-pty')
+  await mkdir(base, { recursive: true })
+  await writeFile(join(base, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-base',
+    dependencies: { '@deepseek-ai/dsh-subprocess-local': 'workspace:^' },
+  }))
+  await symlink(base, join(dirname(dsh), 'dsh-base'))
+  await mkdir(join(subprocessLocal, 'scripts'), { recursive: true })
+  await writeFile(join(subprocessLocal, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-subprocess-local',
+    dependencies: { 'node-pty': '1.1.0' },
+  }))
+  await symlink(subprocessLocal, join(dirname(base), 'dsh-subprocess-local'))
+  await mkdir(join(nodePty, 'prebuilds/darwin-arm64'), { recursive: true })
+  await mkdir(join(nodePty, 'prebuilds/darwin-x64'), { recursive: true })
+  await writeFile(join(nodePty, 'package.json'), JSON.stringify({ name: 'node-pty', version: '1.1.0' }))
+  await writeFile(join(nodePty, 'prebuilds/darwin-arm64/pty.node'), 'arm64 pty')
+  await writeFile(join(nodePty, 'prebuilds/darwin-arm64/spawn-helper'), 'arm64 helper')
+  await writeFile(join(nodePty, 'prebuilds/darwin-x64/pty.node'), 'x64 pty')
+  await writeFile(join(nodePty, 'prebuilds/darwin-x64/spawn-helper'), 'x64 helper')
+  await symlink(nodePty, join(dirname(dirname(subprocessLocal)), 'node-pty'))
+  const repairScript = join(subprocessLocal, 'scripts/ensure-spawn-helper.mjs')
+  await writeFile(repairScript, '')
+  return repairScript
 }
 
 async function createWebClosure(runtimeDirectory: string, dsh: string): Promise<void> {
@@ -102,14 +137,8 @@ async function createWebClosure(runtimeDirectory: string, dsh: string): Promise<
   await symlink(webApp, join(dirname(dsh), 'dsh-web-app'))
 }
 
-async function createRepairScript(runtimeDirectory: string): Promise<string> {
-  const repairScript = join(
-    runtimeDirectory,
-    'node_modules/.pnpm/staged-subprocess-local/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs',
-  )
-  await mkdir(dirname(repairScript), { recursive: true })
-  await writeFile(repairScript, '')
-  return repairScript
+function nodePtyPrebuild(runtimeDirectory: string, architecture: 'darwin-arm64' | 'darwin-x64'): string {
+  return join(runtimeDirectory, 'node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/prebuilds', architecture)
 }
 
 describe('desktop runtime staging', () => {
@@ -133,7 +162,7 @@ describe('desktop runtime staging', () => {
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     const repairScript = join(
       runtimeDirectory,
-      'node_modules/.pnpm/staged-subprocess-local/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs',
+      'node_modules/.pnpm/@deepseek-ai+dsh-subprocess-local@file++++checkout+with%20space/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs',
     )
     const { createStagePlan, executeStagePlan } = await loadStageRuntime()
     const plan = createStagePlan({ repoRoot, platform: 'darwin', arch: 'arm64', electronVersion: '43.4.0' })
@@ -143,6 +172,11 @@ describe('desktop runtime staging', () => {
       runCommand: async (command) => {
         commands.push(command)
         if (command.args.includes('deploy')) await createRuntimeClosure(runtimeDirectory)
+        if (command.executable === process.execPath) {
+          await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
+          const arm64Pty = await lstat(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'pty.node'))
+          expect(arm64Pty.isFile()).toBe(true)
+        }
       },
     })
 
@@ -194,6 +228,52 @@ describe('desktop runtime staging', () => {
     ])
     expect(commands.flatMap(command => command.args).join(' ')).not.toContain('dangerously-allow-all-builds')
     expect(commands.some(command => command.executable === 'pnpm' && command.args.includes('run'))).toBe(false)
+  })
+
+  it('prunes only the resolved node-pty darwin-x64 prebuild directory', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await createRuntimeClosure(runtimeDirectory)
+    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+
+    await pruneUnsupportedNodePtyPrebuild(runtimeDirectory)
+
+    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'pty.node'), 'utf8')).resolves.toBe('arm64 pty')
+    await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'spawn-helper'), 'utf8')).resolves.toBe('arm64 helper')
+  })
+
+  it('rejects a node-pty darwin-x64 symlink without deleting its external target', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await createRuntimeClosure(runtimeDirectory)
+    const externalDirectory = await mkdtemp(join(tmpdir(), 'dsh-node-pty-x64-external-'))
+    directories.push(externalDirectory)
+    const marker = join(externalDirectory, 'keep.txt')
+    await writeFile(marker, 'keep')
+    const x64Prebuild = nodePtyPrebuild(runtimeDirectory, 'darwin-x64')
+    await rm(x64Prebuild, { recursive: true })
+    await symlink(externalDirectory, x64Prebuild)
+    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+
+    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory)).rejects.toThrow(
+      'Staged node-pty darwin-x64 prebuild must be an ordinary internal directory:',
+    )
+    await expect(readFile(marker, 'utf8')).resolves.toBe('keep')
+  })
+
+  it('rejects an unexpected node-pty darwin-x64 prebuild path shape', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await createRuntimeClosure(runtimeDirectory)
+    const x64Prebuild = nodePtyPrebuild(runtimeDirectory, 'darwin-x64')
+    await rm(x64Prebuild, { recursive: true })
+    await writeFile(x64Prebuild, 'not a directory')
+    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+
+    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory)).rejects.toThrow(
+      'Staged node-pty darwin-x64 prebuild must be an ordinary internal directory:',
+    )
   })
 
   it('removes only the deterministic runtime directory and executes the exact deploy and rebuild plans', async () => {

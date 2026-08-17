@@ -120,6 +120,22 @@ describe('HarnessProcessController', () => {
     await controller.stop()
   })
 
+  it('records the owned backend pid for standalone lifecycle verification', async () => {
+    const { controller, children } = await createController(['normal'])
+
+    await controller.start()
+    const entries = (await readFile(join(userDataDirectories[0]!, 'Logs', 'desktop.log'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as { event: string; pid?: number })
+
+    expect(entries).toContainEqual(expect.objectContaining({
+      event: 'harness-starting',
+      pid: children[0]?.pid,
+    }))
+    await controller.stop()
+  })
+
   it('times out when the child does not emit a strict harness URL', async () => {
     const { controller, kills } = await createController(['non-matching-output'], { startupTimeoutMs: 100 })
 

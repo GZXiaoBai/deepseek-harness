@@ -3,6 +3,7 @@ import { lstat, opendir, realpath, rm, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { auditArm64MachO } from './macho-audit.mjs'
 
 const ELECTRON_VERSION = '43.4.0'
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -92,7 +93,7 @@ export function createStagePlan(input) {
  * Executes a staging plan and validates its deployable runtime closure.
  *
  * @param {StagePlan} plan Fixed paths and commands returned by {@link createStagePlan}.
- * @param {{ runCommand?: (command: StageCommand) => Promise<void> }} [options] Injectable command executor.
+ * @param {{ runCommand?: (command: StageCommand) => Promise<void>, auditRuntime?: (runtimeDirectory: string) => Promise<unknown> }} [options] Injectable staging operations.
  * @returns {Promise<void>} Resolves after the staged closure passes validation.
  */
 export async function executeStagePlan(plan, options = {}) {
@@ -102,6 +103,7 @@ export async function executeStagePlan(plan, options = {}) {
   await removeRuntimeDirectory(plan.runtimeDirectory)
   await runCommand(plan.deployCommand)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
+  await pruneUnsupportedNodePtyPrebuild(plan.runtimeDirectory)
   const repairScript = await findRepairScript(plan.runtimeDirectory)
   await runCommand({
     executable: process.execPath,
@@ -113,6 +115,100 @@ export async function executeStagePlan(plan, options = {}) {
   await resolveCliEntryPath(plan.runtimeDirectory)
   await resolveWebFrontendIndex(plan.runtimeDirectory)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
+  await (options.auditRuntime ?? auditArm64MachO)(plan.runtimeDirectory)
+}
+
+/**
+ * Removes the dormant Intel node-pty prebuild from an Apple Silicon runtime.
+ *
+ * @param {string} runtimeDirectory Deployed Desktop runtime package root.
+ * @returns {Promise<void>} Resolves after removing only the contained darwin-x64 directory.
+ */
+export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory) {
+  const canonicalRuntimeDirectory = await realpath(runtimeDirectory)
+  let nodePtyPackage
+  try {
+    const runtimeRequire = createRequire(join(runtimeDirectory, 'package.json'))
+    const dshPackage = await resolveInternalPackage(
+      runtimeRequire,
+      '@deepseek-ai/dsh/package.json',
+      canonicalRuntimeDirectory,
+    )
+    const basePackage = await resolveInternalPackage(
+      createRequire(dshPackage),
+      '@deepseek-ai/dsh-base/package.json',
+      canonicalRuntimeDirectory,
+    )
+    const subprocessPackage = await resolveInternalPackage(
+      createRequire(basePackage),
+      '@deepseek-ai/dsh-subprocess-local/package.json',
+      canonicalRuntimeDirectory,
+    )
+    nodePtyPackage = await resolveInternalPackage(
+      createRequire(subprocessPackage),
+      'node-pty/package.json',
+      canonicalRuntimeDirectory,
+    )
+  } catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND') throw error
+    throw new Error('Staged node-pty package is missing from the runtime dependency closure')
+  }
+
+  const nodePtyDirectory = dirname(nodePtyPackage)
+  const prebuildsDirectory = join(nodePtyDirectory, 'prebuilds')
+  const arm64Directory = join(prebuildsDirectory, 'darwin-arm64')
+  const x64Directory = join(prebuildsDirectory, 'darwin-x64')
+  await requireOrdinaryInternalDirectory(
+    prebuildsDirectory,
+    canonicalRuntimeDirectory,
+    `Staged node-pty prebuilds must be an ordinary internal directory: ${prebuildsDirectory}`,
+  )
+  await requireOrdinaryInternalDirectory(
+    arm64Directory,
+    canonicalRuntimeDirectory,
+    `Staged node-pty darwin-arm64 prebuild must be an ordinary internal directory: ${arm64Directory}`,
+  )
+  await requireOrdinaryFile(join(arm64Directory, 'pty.node'), 'Staged node-pty darwin-arm64 pty.node is missing')
+  await requireOrdinaryFile(join(arm64Directory, 'spawn-helper'), 'Staged node-pty darwin-arm64 spawn-helper is missing')
+  await requireOrdinaryInternalDirectory(
+    x64Directory,
+    canonicalRuntimeDirectory,
+    `Staged node-pty darwin-x64 prebuild must be an ordinary internal directory: ${x64Directory}`,
+  )
+  await rm(x64Directory, { recursive: true })
+}
+
+/** @param {NodeJS.Require} packageRequire @param {string} specifier @param {string} canonicalRuntimeDirectory */
+async function resolveInternalPackage(packageRequire, specifier, canonicalRuntimeDirectory) {
+  const packagePath = packageRequire.resolve(specifier)
+  const entry = await lstat(packagePath)
+  const canonicalPath = await realpath(packagePath)
+  if (entry.isSymbolicLink() || !entry.isFile() || !contains(canonicalRuntimeDirectory, canonicalPath)) {
+    throw new Error(`Staged package manifest must be a regular internal file: ${packagePath}`)
+  }
+  return canonicalPath
+}
+
+/** @param {string} path @param {string} canonicalRuntimeDirectory @param {string} message */
+async function requireOrdinaryInternalDirectory(path, canonicalRuntimeDirectory, message) {
+  try {
+    const entry = await lstat(path)
+    if (!entry.isSymbolicLink() && entry.isDirectory() && contains(canonicalRuntimeDirectory, await realpath(path))) return
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  throw new Error(message)
+}
+
+/** @param {string} path @param {string} message */
+async function requireOrdinaryFile(path, message) {
+  try {
+    const entry = await lstat(path)
+    if (!entry.isSymbolicLink() && entry.isFile()) return
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  throw new Error(message)
 }
 
 /**
