@@ -490,10 +490,16 @@ async function requireCanonicalDescendant(canonicalParent, candidate, label) {
 
 /** @param {string} script @param {NodeJS.ProcessEnv} [environment] */
 async function runPowerShell(script, environment = {}) {
-  return await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+  return await run(resolvePowerShellExecutable(process.env), ['-NoProfile', '-NonInteractive', '-Command', script], {
     environment,
     windowsHide: true,
   })
+}
+
+/** @param {NodeJS.ProcessEnv} environment */
+export function resolvePowerShellExecutable(environment) {
+  const executable = environment.DSH_POWERSHELL_EXECUTABLE?.trim()
+  return executable === undefined || executable === '' ? 'powershell.exe' : executable
 }
 
 /** @param {string} executable @param {readonly string[]} args @param {{ environment?: NodeJS.ProcessEnv, windowsHide?: boolean }} [options] */
