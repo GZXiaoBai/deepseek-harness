@@ -14,7 +14,10 @@ interface WindowsPackageVerifier {
   resolvePowerShellExecutable?: (environment: NodeJS.ProcessEnv) => string
   createWindowsVerifyPlan?: (input: { desktopRoot: string; platform: NodeJS.Platform; arch: string }) => WindowsVerifyPlan
   findNsisInstaller?: (releaseDirectory: string) => Promise<string>
-  validateWindowsAppLayout?: (appDirectory: string) => Promise<{
+  validateWindowsAppLayout?: (
+    appDirectory: string,
+    options?: { expectedNonX64Pe?: Readonly<Record<string, number>> },
+  ) => Promise<{
     executable: string
     runtime: string
     peFiles: readonly string[]
@@ -156,6 +159,56 @@ describe('Windows Desktop package verification', () => {
 
     await expect(verifier.validateWindowsAppLayout?.(appDirectory)).rejects.toThrow(
       `Packaged Windows application contains the forbidden elevation helper: ${elevateHelper}`,
+    )
+  })
+
+  it('permits only the exact expected x86 NSIS uninstaller in an installed x64 application', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-installed-layout-'))
+    directories.push(root)
+    const appDirectory = join(root, 'installed')
+    const nestedPe = await createWindowsApp(appDirectory)
+    const uninstaller = join(appDirectory, 'Uninstall DeepSeek Harness.exe')
+    await writeFile(uninstaller, peFixture(0x014c))
+    const verifier = await loadVerifier()
+
+    await expect(verifier.validateWindowsAppLayout?.(appDirectory, {
+      expectedNonX64Pe: { [uninstaller]: 0x014c },
+    })).resolves.toEqual({
+      executable: join(appDirectory, 'DeepSeek Harness.exe'),
+      runtime: join(appDirectory, 'resources/runtime'),
+      peFiles: [join(appDirectory, 'DeepSeek Harness.exe'), nestedPe].sort(),
+    })
+  }, 30_000)
+
+  it('rejects any additional x86 PE beside the exact NSIS uninstaller exception', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-installed-rogue-pe-'))
+    directories.push(root)
+    const appDirectory = join(root, 'installed')
+    await createWindowsApp(appDirectory)
+    const uninstaller = join(appDirectory, 'Uninstall DeepSeek Harness.exe')
+    const rogue = join(appDirectory, 'resources/rogue.exe')
+    await writeFile(uninstaller, peFixture(0x014c))
+    await writeFile(rogue, peFixture(0x014c))
+    const verifier = await loadVerifier()
+
+    await expect(verifier.validateWindowsAppLayout?.(appDirectory, {
+      expectedNonX64Pe: { [uninstaller]: 0x014c },
+    })).rejects.toThrow(`Windows x64 artifact contains a non-x64 PE file: ${rogue} (0x014c)`)
+  })
+
+  it('rejects a declared NSIS exception when its reviewed machine type changes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-changed-uninstaller-'))
+    directories.push(root)
+    const appDirectory = join(root, 'installed')
+    await createWindowsApp(appDirectory)
+    const uninstaller = join(appDirectory, 'Uninstall DeepSeek Harness.exe')
+    await writeFile(uninstaller, peFixture(0x8664))
+    const verifier = await loadVerifier()
+
+    await expect(verifier.validateWindowsAppLayout?.(appDirectory, {
+      expectedNonX64Pe: { [uninstaller]: 0x014c },
+    })).rejects.toThrow(
+      `Expected reviewed non-x64 PE file was missing or changed: ${uninstaller} (0x014c)`,
     )
   })
 

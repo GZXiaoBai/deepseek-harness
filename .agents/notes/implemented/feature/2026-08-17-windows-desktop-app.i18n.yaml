@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-17-windows-desktop-app.md
-2026-08-17-windows-desktop-app.md: c676be5ca27a936b6a131f62720dd7d3c6dd53bb
-2026-08-17-windows-desktop-app.zh.md: baf54ed9a89f8afb6e062881cf423fb918278139
+2026-08-17-windows-desktop-app.md: fd26a00245be697ffba09b6faca3927cd0c4ea24
+2026-08-17-windows-desktop-app.zh.md: 0e73caf93d4539c1123b9ae127c10fc06e74e8a9

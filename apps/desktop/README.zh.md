@@ -45,6 +45,6 @@ pnpm --filter @deepseek-ai/dsh-desktop run verify:package
 
 macOS 验证器会验证发布 App，启动仓库外的副本，并对已挂载 DMG 中的 App 重新进行静态验证。它检查 Web UI、单实例交接、隔离的 Harness 数据、进程与端口清理、运行时包含性、arm64 Mach-O 文件、ad-hoc Hardened Runtime 签名和 entitlements。`spctl` 拒绝这个有意未经公证的个人构建属于预期结果。
 
-Windows 验证器会同时验证 `win-unpacked` 与静默安装的当前用户 NSIS 版本。它检查运行时没有符号链接、junction 或其他 reparse point；所有 PE 文件均为 x64；应用与安装程序均为 `NotSigned`；回环 HTTP 与现有页面标题正常；第二次启动保留原后端；关闭窗口会移除所拥有的进程树和监听器；安装只创建开始菜单快捷方式；卸载会移除程序文件但保留 Harness 数据。
+Windows 验证器会同时验证 `win-unpacked` 与静默安装的当前用户 NSIS 版本。它检查运行时没有符号链接、junction 或其他 reparse point；应用负载中的每个 PE 文件均为 x64；标准 NSIS 卸载程序是已安装根目录下唯一经过审查的 x86 PE，且 COFF machine 固定为 `0x014c`；应用、安装程序和卸载程序均为 `NotSigned`；回环 HTTP 与现有页面标题正常；第二次启动保留原后端；关闭窗口会移除所拥有的进程树和监听器；安装只创建开始菜单快捷方式；卸载会移除程序文件但保留 Harness 数据。
 
 GitHub Windows Server 2025 工作流是自动打包门禁。首次发布 Windows 版本前，还必须在真实 Windows 11 x64 电脑上运行同一安装程序与验证器，并单独记录结果；Server 2025 CI 不能作为 Windows 11 验收证据。
