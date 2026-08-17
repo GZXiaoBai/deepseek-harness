@@ -12,6 +12,7 @@ import {
 } from './stage-runtime.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
 import { requireClosedTcpPort, terminateOwnedProcessGroup, terminateOwnedWindowsProcessTree } from './process-group.mjs'
+import { runRuntimeSmokeProcess } from './runtime-smoke-process.mjs'
 
 const STARTUP_TIMEOUT_MS = 15_000
 const runtimeDirectory = fileURLToPath(new URL('../.runtime/', import.meta.url))
@@ -30,8 +31,11 @@ if (target.platform === 'win32') {
 
 const dshHome = await mkdtemp(join(tmpdir(), 'dsh-desktop-runtime-'))
 try {
+  console.log('Verifying staged Electron native modules...')
   await runNativeSmoke(dshHome)
+  console.log('Verifying staged CLI version...')
   await runVersion(dshHome)
+  console.log('Verifying staged Web runtime...')
   await runWebSmoke(dshHome)
 } finally {
   await rm(dshHome, { recursive: true })
@@ -87,13 +91,24 @@ const terminal = pty.spawn(shell, shellArgs, {
 })
 let output = ''
 terminal.onData(chunk => { output += chunk })
+const probeTimer = setTimeout(() => {
+  terminal.kill()
+  process.stderr.write('node-pty did not exit within 10000ms\\n', () => process.exit(1))
+}, 10000)
 terminal.onExit(({ exitCode }) => {
-  if (exitCode !== 0) throw new Error('node-pty exited with code ' + String(exitCode))
-  if (!output.includes('dsh-native-pty-ok')) throw new Error('node-pty did not return probe output')
-  console.log('Electron native modules: node-pty exercised; koffi loaded')
+  clearTimeout(probeTimer)
+  if (exitCode !== 0) {
+    process.stderr.write('node-pty exited with code ' + String(exitCode) + '\\n', () => process.exit(1))
+    return
+  }
+  if (!output.includes('dsh-native-pty-ok')) {
+    process.stderr.write('node-pty did not return probe output\\n', () => process.exit(1))
+    return
+  }
+  process.stdout.write('Electron native modules: node-pty exercised; koffi loaded\\n', () => process.exit(0))
 })
 `
-  const result = await runToExit(['-e', script], dshHome)
+  const result = await runToExit(['-e', script], dshHome, 'Electron native-module smoke')
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)
   if (result.code !== 0 || !result.stdout.includes('Electron native modules: node-pty exercised; koffi loaded')) {
@@ -103,7 +118,7 @@ terminal.onExit(({ exitCode }) => {
 
 /** @param {string} dshHome */
 async function runVersion(dshHome) {
-  const result = await runToExit([cliEntryPath, '--version'], dshHome)
+  const result = await runToExit([cliEntryPath, '--version'], dshHome, 'Staged CLI --version')
   process.stdout.write(result.stdout)
   process.stderr.write(result.stderr)
   if (result.code !== 0) {
@@ -193,30 +208,16 @@ async function runWebSmoke(dshHome) {
   }
 }
 
-/** @param {readonly string[]} args @param {string} dshHome */
-async function runToExit(args, dshHome) {
-  return await new Promise((resolveRun, rejectRun) => {
-    const child = spawn(electronExecutable, args, {
-      cwd: runtimeDirectory,
-      env: runtimeEnvironment(dshHome),
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      ...(target.platform === 'win32' ? { windowsHide: true } : {}),
-    })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', chunk => { stdout += chunk })
-    child.stderr.on('data', chunk => { stderr += chunk })
-    child.once('error', rejectRun)
-    child.once('exit', (code, signal) => {
-      if (signal !== null) {
-        rejectRun(new Error(`Staged CLI exited with signal ${signal}`))
-        return
-      }
-      resolveRun({ code, stdout, stderr })
-    })
+/** @param {readonly string[]} args @param {string} dshHome @param {string} label */
+async function runToExit(args, dshHome, label) {
+  return await runRuntimeSmokeProcess({
+    executable: electronExecutable,
+    args,
+    cwd: runtimeDirectory,
+    environment: runtimeEnvironment(dshHome),
+    platform: target.platform,
+    label,
+    timeoutMs: STARTUP_TIMEOUT_MS,
   })
 }
 
