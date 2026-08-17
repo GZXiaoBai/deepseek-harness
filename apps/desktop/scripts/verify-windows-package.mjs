@@ -211,9 +211,11 @@ async function verifyInstalledWindowsPackage(installer) {
     await writeFile(preservationMarker, 'preserve')
     await run(installedPaths.uninstaller, ['/S'], { windowsHide: true })
     installed = false
-    await waitForMissing(installedPaths.installDirectory, SHUTDOWN_TIMEOUT_MS)
-    await requireMissing(paths.startMenuShortcut, 'NSIS uninstall left the Start Menu shortcut')
-    await requireMissing(paths.desktopShortcut, 'NSIS uninstall left the Desktop shortcut')
+    await waitForWindowsUninstallCleanup([
+      installedPaths.installDirectory,
+      paths.startMenuShortcut,
+      paths.desktopShortcut,
+    ], SHUTDOWN_TIMEOUT_MS)
     await requireOrdinaryFile(preservationMarker, 'NSIS uninstall removed preserved application data')
   } finally {
     if (installed && installedPaths !== undefined) {
@@ -488,6 +490,17 @@ async function waitForMissing(path, timeoutMs) {
     if (Date.now() >= deadline) throw new Error(`Windows uninstall did not remove: ${path}`)
     await delay(50)
   }
+}
+
+/**
+ * Waits for the NSIS temporary uninstaller process to remove every installed path.
+ * The uninstaller executable can return before its child removes shortcuts.
+ *
+ * @param {readonly string[]} paths Installation and shortcut paths that must disappear.
+ * @param {number} timeoutMs Maximum cleanup wait for each concurrently observed path.
+ */
+export async function waitForWindowsUninstallCleanup(paths, timeoutMs) {
+  await Promise.all(paths.map(async path => await waitForMissing(path, timeoutMs)))
 }
 
 /** @param {string} path @param {string} message */
