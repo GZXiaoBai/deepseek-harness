@@ -1,9 +1,13 @@
 type MenuAction = () => void
 
+/** Native Electron editing command delegated to the focused web content. */
+export type ApplicationMenuRole = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll'
+
 /** Framework-independent menu item consumed by the Electron adapter. */
 export interface ApplicationMenuItem {
   label?: string
   type?: 'separator'
+  role?: ApplicationMenuRole
   accelerator?: string
   action?: MenuAction
   submenu?: ApplicationMenuItem[]
@@ -33,6 +37,18 @@ export function createApplicationMenu(actions: ApplicationMenuActions): Applicat
         { label: 'Open Logs Directory', action: actions.openLogsDirectory },
         { type: 'separator' },
         { label: 'Quit', accelerator: 'CommandOrControl+Q', action: actions.quit },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
       ],
     },
     {
