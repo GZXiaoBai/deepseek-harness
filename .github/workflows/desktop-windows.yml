@@ -1,0 +1,71 @@
+name: Windows Desktop
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PRIMARY_NODE_VERSION: '24'
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  windows-desktop:
+    name: Windows Desktop / NSIS x64
+    runs-on: >-
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'dsh-windows-2025-16core' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Source tests create symlink fixtures. Packaged and installed runtimes are separately required to contain no reparse points.
+      - name: Enable Developer Mode for source tests
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Test shared Desktop behavior on Windows
+        shell: pwsh
+        run: pnpm run test:desktop
+
+      - name: Build Windows x64 App and NSIS
+        shell: pwsh
+        run: pnpm run package:desktop
+
+      - name: Verify unpacked App, installation, launch, and uninstall
+        shell: pwsh
+        run: pnpm --filter @deepseek-ai/dsh-desktop run verify:package
+
+      - name: Upload unsigned personal installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-harness-windows-x64
+          path: apps/desktop/release/DeepSeek Harness Setup *-x64.exe
+          if-no-files-found: error
+          retention-days: 14

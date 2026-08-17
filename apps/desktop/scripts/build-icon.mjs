@@ -1,13 +1,15 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
+import { createWindowsIco } from './icon-format.mjs'
 
 const sourceIcon = fileURLToPath(new URL('../../web/public/favicon.svg', import.meta.url))
 const buildDirectory = new URL('../build/', import.meta.url)
-const outputIcon = new URL('../build/icon.icns', import.meta.url)
+const outputIcns = new URL('../build/icon.icns', import.meta.url)
+const outputIco = new URL('../build/icon.ico', import.meta.url)
 const iconSizes = [
   ['icon_16x16.png', 16],
   ['icon_16x16@2x.png', 32],
@@ -21,11 +23,17 @@ const iconSizes = [
   ['icon_512x512@2x.png', 1024],
 ]
 
-if (process.platform !== 'darwin') {
-  throw new Error(`Unsupported icon build platform: ${process.platform}; expected darwin`)
+if (process.platform !== 'darwin' && process.platform !== 'win32') {
+  throw new Error(`Unsupported icon build platform: ${process.platform}; expected darwin or win32`)
 }
 
 await mkdir(buildDirectory, { recursive: true })
+if (process.platform === 'win32') {
+  const png = await sharp(sourceIcon).resize(256, 256).png().toBuffer()
+  await writeFile(outputIco, createWindowsIco(png))
+  process.exit(0)
+}
+
 const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dsh-desktop-icon-'))
 const iconsetDirectory = join(temporaryDirectory, 'DeepSeek Harness.iconset')
 
@@ -34,7 +42,7 @@ try {
   await Promise.all(iconSizes.map(async ([name, size]) => {
     await sharp(sourceIcon).resize(size, size).png().toFile(join(iconsetDirectory, String(name)))
   }))
-  await run('iconutil', ['-c', 'icns', iconsetDirectory, '-o', fileURLToPath(outputIcon)])
+  await run('iconutil', ['-c', 'icns', iconsetDirectory, '-o', fileURLToPath(outputIcns)])
 } finally {
   await rm(temporaryDirectory, { recursive: true })
 }

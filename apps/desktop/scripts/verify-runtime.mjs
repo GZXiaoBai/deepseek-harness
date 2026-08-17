@@ -4,21 +4,29 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assertRuntimeSymlinksContained, resolveCliEntryPath, resolveWebFrontendIndex } from './stage-runtime.mjs'
-import { requireClosedTcpPort, terminateOwnedProcessGroup } from './process-group.mjs'
+import {
+  assertRuntimeContainsNoLinks,
+  assertRuntimeSymlinksContained,
+  resolveCliEntryPath,
+  resolveWebFrontendIndex,
+} from './stage-runtime.mjs'
+import { auditX64Pe } from './pe-audit.mjs'
+import { requireClosedTcpPort, terminateOwnedProcessGroup, terminateOwnedWindowsProcessTree } from './process-group.mjs'
 
 const STARTUP_TIMEOUT_MS = 15_000
 const runtimeDirectory = fileURLToPath(new URL('../.runtime/', import.meta.url))
 const require = createRequire(import.meta.url)
 const electronExecutable = require('electron')
 
-if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-  throw new Error(`Unsupported desktop runtime verification target: ${process.platform}-${process.arch}; expected darwin-arm64`)
-}
+const target = resolveRuntimeTarget(process.platform, process.arch)
 
 const cliEntryPath = await resolveCliEntryPath(runtimeDirectory)
 await resolveWebFrontendIndex(runtimeDirectory)
 await assertRuntimeSymlinksContained(runtimeDirectory)
+if (target.platform === 'win32') {
+  await assertRuntimeContainsNoLinks(runtimeDirectory)
+  await auditX64Pe(runtimeDirectory)
+}
 
 const dshHome = await mkdtemp(join(tmpdir(), 'dsh-desktop-runtime-'))
 try {
@@ -63,7 +71,18 @@ const directoryPickerRequire = createRequire(directoryPickerPackage)
 requireStagedPath(directoryPickerRequire.resolve('koffi'))
 const koffi = directoryPickerRequire('koffi')
 if (koffi.sizeof('void *') !== 8) throw new Error('Unexpected koffi pointer size')
-const terminal = pty.spawn('/bin/sh', ['-lc', 'printf dsh-native-pty-ok'], {
+if (process.platform === 'win32') {
+  const kernel32 = koffi.load('kernel32.dll')
+  const getCurrentThreadId = kernel32.func('__stdcall', 'GetCurrentThreadId', 'uint32', [])
+  if (!Number.isInteger(getCurrentThreadId()) || getCurrentThreadId() < 1) {
+    throw new Error('koffi could not call kernel32 GetCurrentThreadId')
+  }
+}
+const shell = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh'
+const shellArgs = process.platform === 'win32'
+  ? ['/d', '/s', '/c', 'echo dsh-native-pty-ok']
+  : ['-lc', 'printf dsh-native-pty-ok']
+const terminal = pty.spawn(shell, shellArgs, {
   name: 'xterm-256color', cols: 80, rows: 24, cwd: ${JSON.stringify(runtimeDirectory)}, env: process.env,
 })
 let output = ''
@@ -96,9 +115,11 @@ async function runVersion(dshHome) {
 async function runWebSmoke(dshHome) {
   const child = spawn(electronExecutable, ['--expose-internals', cliEntryPath, 'web', '--host', '127.0.0.1', '--port', '0'], {
     cwd: runtimeDirectory,
-    detached: true,
+    detached: target.platform === 'darwin',
     env: runtimeEnvironment(dshHome),
+    shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
+    ...(target.platform === 'win32' ? { windowsHide: true } : {}),
   })
   if (child.pid === undefined || child.stdout === null || child.stderr === null) {
     throw new Error('Electron did not create the owned Web process group')
@@ -154,12 +175,20 @@ async function runWebSmoke(dshHome) {
       throw new Error(`Staged Web runtime returned the wrong page title for ${url.href}`)
     }
   } finally {
-    await terminateOwnedProcessGroup({
-      processGroupId,
-      leaderPid: processGroupId,
-      exit,
-      leaderExited: () => child.exitCode !== null || child.signalCode !== null,
-    })
+    if (target.platform === 'win32') {
+      await terminateOwnedWindowsProcessTree({
+        leaderPid: processGroupId,
+        exit,
+        leaderExited: () => child.exitCode !== null || child.signalCode !== null,
+      })
+    } else {
+      await terminateOwnedProcessGroup({
+        processGroupId,
+        leaderPid: processGroupId,
+        exit,
+        leaderExited: () => child.exitCode !== null || child.signalCode !== null,
+      })
+    }
     if (url !== undefined) await requireClosedTcpPort(url)
   }
 }
@@ -170,7 +199,9 @@ async function runToExit(args, dshHome) {
     const child = spawn(electronExecutable, args, {
       cwd: runtimeDirectory,
       env: runtimeEnvironment(dshHome),
+      shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...(target.platform === 'win32' ? { windowsHide: true } : {}),
     })
     let stdout = ''
     let stderr = ''
@@ -210,4 +241,11 @@ function parseHarnessUrl(line) {
 /** @param {number | null} code @param {NodeJS.Signals | null} signal */
 function describeExit(code, signal) {
   return signal === null ? `exit code ${String(code)}` : `signal ${signal}`
+}
+
+/** @param {NodeJS.Platform} platform @param {string} arch */
+function resolveRuntimeTarget(platform, arch) {
+  if (platform === 'darwin' && arch === 'arm64') return { platform, arch }
+  if (platform === 'win32' && arch === 'x64') return { platform, arch }
+  throw new Error(`Unsupported desktop runtime verification target: ${platform}-${arch}; expected darwin-arm64 or win32-x64`)
 }

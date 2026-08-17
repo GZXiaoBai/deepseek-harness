@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-17-desktop-closed-runtime-deploy-root.md
-2026-08-17-desktop-closed-runtime-deploy-root.md: 476962b0f6d55c2594a6864f7b8d8a880c26c8a3
-2026-08-17-desktop-closed-runtime-deploy-root.zh.md: 1965ce28e5530c1f7fc46eb721ccb017d3e44b13
+2026-08-17-desktop-closed-runtime-deploy-root.md: 8f9bbfafa796962d8b31b371aa077c43ebdc4ab7
+2026-08-17-desktop-closed-runtime-deploy-root.zh.md: d940429f0242991058ff848e38e5f5009bae0b31

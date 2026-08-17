@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
 import { DesktopLogger } from './desktop-logger.ts'
+import { resolveDesktopTarget } from './desktop-target.ts'
 import { HarnessProcessController } from './harness-process.ts'
 import { buildChildEnvironment } from './login-path.ts'
 import { createApplicationMenu, type ApplicationMenu, type ApplicationMenuItem } from './menu.ts'
@@ -663,6 +664,7 @@ async function runElectronMain(): Promise<void> {
     })
     const environment = await buildChildEnvironment(process.env)
     const harness = new HarnessProcessController({
+      target: resolveDesktopTarget(process.platform, process.arch),
       executable: process.execPath,
       cliPath,
       dshHome: resolveDesktopDshHome(userDataPath),

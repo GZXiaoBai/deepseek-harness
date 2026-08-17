@@ -579,4 +579,11 @@ async function delay(timeoutMs) {
 const isMain = process.argv[1] !== undefined
   && pathToFileURL(resolve(process.argv[1])).href === import.meta.url
 
-if (isMain) await verifyPackage()
+if (isMain) {
+  if (process.platform === 'win32') {
+    const { verifyWindowsPackage } = await import('./verify-windows-package.mjs')
+    await verifyWindowsPackage()
+  } else {
+    await verifyPackage()
+  }
+}

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { connect } from 'node:net'
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
@@ -41,6 +42,29 @@ export async function terminateOwnedProcessGroup(options) {
     while (!await waitForOwnedGroupExit(options, signalProcess, shutdownTimeoutMs)) {
       if (!signalOwnedGroup(options, signalProcess, 'SIGKILL', true)) break
     }
+  }
+  await options.exit
+}
+
+/**
+ * Terminates one owned Windows process tree and waits for its leader exit.
+ *
+ * @param {{ leaderPid: number, exit: Promise<unknown>, leaderExited: () => boolean, runTaskkill?: typeof runTaskkill }} options Owned Windows process facts.
+ * @returns {Promise<void>} Resolves after taskkill succeeds and the leader exit is observed.
+ */
+export async function terminateOwnedWindowsProcessTree(options) {
+  if (options.leaderExited()) {
+    await options.exit
+    return
+  }
+  const result = await (options.runTaskkill ?? runTaskkill)(
+    'taskkill.exe',
+    ['/PID', String(options.leaderPid), '/T', '/F'],
+    { shell: false, windowsHide: true },
+  )
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.trim()
+    throw new Error(`taskkill.exe exited with code ${String(result.exitCode)}${detail === '' ? '' : `: ${detail}`}`)
   }
   await options.exit
 }
@@ -90,6 +114,18 @@ async function tcpPortAcceptsConnections(host, port, timeoutMs) {
       }
       rejectProbe(error)
     })
+  })
+}
+
+/** @param {string} executable @param {readonly string[]} args @param {{ shell: false, windowsHide: true }} options */
+async function runTaskkill(executable, args, options) {
+  return await new Promise((resolveRun, rejectRun) => {
+    const child = spawn(executable, args, { ...options, stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', chunk => { stderr += chunk })
+    child.once('error', rejectRun)
+    child.once('exit', code => resolveRun({ exitCode: code ?? 1, stderr }))
   })
 }
 

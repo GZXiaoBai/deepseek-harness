@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import type { DesktopLogSink } from './desktop-logger.ts'
+import { resolveDesktopTarget, type DesktopTarget } from './desktop-target.ts'
 import { parseHarnessUrl } from './harness-url.ts'
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000
@@ -12,8 +13,19 @@ export type HarnessProcessSpawner = (
   options: SpawnOptions,
 ) => ChildProcess
 
+/** Shell-free taskkill command operation used by Windows process-tree cleanup. */
+export type WindowsTaskkillRunner = (
+  executable: string,
+  args: readonly string[],
+  options: Readonly<{ shell: false; windowsHide: true }>,
+) => Promise<Readonly<{ exitCode: number; stderr: string }>>
+
+/** Terminates one Windows process id and every descendant owned beneath it. */
+export type WindowsProcessTreeTerminator = (pid: number) => Promise<void>
+
 /** Dependencies and paths required to run the bundled Harness web server. */
 export interface HarnessProcessOptions {
+  target: DesktopTarget
   executable: string
   cliPath: string
   dshHome: string
@@ -23,8 +35,32 @@ export interface HarnessProcessOptions {
   shutdownTimeoutMs?: number
   spawnProcess?: HarnessProcessSpawner
   killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void
+  terminateWindowsProcessTree?: WindowsProcessTreeTerminator
   healthCheck?: (url: URL, signal: AbortSignal) => Promise<void>
   logger: DesktopLogSink
+}
+
+export { resolveDesktopTarget }
+
+/**
+ * Runs taskkill against one owned Windows process tree without a command shell.
+ *
+ * @param pid Positive root process id returned by the owned child spawn.
+ * @param runCommand Injectable command boundary used by focused tests.
+ */
+export async function terminateWindowsProcessTree(
+  pid: number,
+  runCommand: WindowsTaskkillRunner = runTaskkillCommand,
+): Promise<void> {
+  const result = await runCommand(
+    'taskkill.exe',
+    ['/PID', String(pid), '/T', '/F'],
+    { shell: false, windowsHide: true },
+  )
+  if (result.exitCode === 0) return
+
+  const detail = result.stderr.trim()
+  throw new Error(`taskkill.exe exited with code ${result.exitCode}${detail === '' ? '' : `: ${detail}`}`)
 }
 
 /**
@@ -65,6 +101,7 @@ export class HarnessProcessController {
   readonly #options: Required<Pick<HarnessProcessOptions, 'startupTimeoutMs' | 'shutdownTimeoutMs'>> & HarnessProcessOptions
   readonly #spawnProcess: HarnessProcessSpawner
   readonly #killProcessGroup: (pid: number, signal: NodeJS.Signals) => void
+  readonly #terminateWindowsProcessTree: WindowsProcessTreeTerminator
   readonly #healthCheck: (url: URL, signal: AbortSignal) => Promise<void>
   readonly #unexpectedExitListeners = new Set<(error: Error) => void>()
   #state: HarnessProcessState = 'idle'
@@ -83,6 +120,7 @@ export class HarnessProcessController {
     }
     this.#spawnProcess = options.spawnProcess ?? spawn
     this.#killProcessGroup = options.killProcessGroup ?? ((pid, signal) => process.kill(pid, signal))
+    this.#terminateWindowsProcessTree = options.terminateWindowsProcessTree ?? terminateWindowsProcessTree
     this.#healthCheck = options.healthCheck ?? checkHarnessHealth
   }
 
@@ -99,11 +137,14 @@ export class HarnessProcessController {
     const args = buildHarnessBackendArgs(this.#options.cliPath, this.#options.env)
     let child: ChildProcess
     try {
+      const windowsTarget = this.#options.target.platform === 'win32'
       child = this.#spawnProcess(this.#options.executable, args, {
         cwd: this.#options.cwd,
-        detached: true,
+        detached: !windowsTarget,
         env: { ...this.#options.env, DSH_HOME: this.#options.dshHome },
+        shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
+        ...(windowsTarget ? { windowsHide: true } : {}),
       })
     } catch (error) {
       return Promise.reject(asError(error, 'Unable to start Harness process'))
@@ -267,6 +308,11 @@ export class HarnessProcessController {
   }
 
   async #terminate(run: RunningHarness): Promise<void> {
+    if (this.#options.target.platform === 'win32') {
+      await this.#terminateWindows(run)
+      return
+    }
+
     if (!this.#isProcessGroupAlive(run)) return
 
     this.#signalGroup(run, 'SIGTERM')
@@ -276,6 +322,25 @@ export class HarnessProcessController {
     while (!await this.#waitForProcessGroupExit(run, this.#options.shutdownTimeoutMs)) {
       this.#signalGroup(run, 'SIGKILL')
     }
+  }
+
+  async #terminateWindows(run: RunningHarness): Promise<void> {
+    const { pid } = run.child
+    if (pid === undefined || !this.#isChildAlive(run)) return
+
+    await this.#terminateWindowsProcessTree(pid)
+
+    const deadline = Date.now() + this.#options.shutdownTimeoutMs
+    while (this.#isChildAlive(run)) {
+      if (Date.now() >= deadline) {
+        throw new Error(`Windows Harness process tree did not exit after ${this.#options.shutdownTimeoutMs}ms`)
+      }
+      await delay(5)
+    }
+  }
+
+  #isChildAlive(run: RunningHarness): boolean {
+    return run.child.exitCode === null && run.child.signalCode === null
   }
 
   #signalGroup(run: RunningHarness, signal: NodeJS.Signals): void {
@@ -390,4 +455,26 @@ function describeExit(prefix: string, code: number | null, signal: NodeJS.Signal
  */
 async function delay(timeoutMs: number): Promise<void> {
   await new Promise<void>(resolve => setTimeout(resolve, timeoutMs))
+}
+
+async function runTaskkillCommand(
+  executable: string,
+  args: readonly string[],
+  options: Readonly<{ shell: false; windowsHide: true }>,
+): Promise<Readonly<{ exitCode: number; stderr: string }>> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(executable, [...args], {
+      ...options,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
+    let stderr = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk
+    })
+    child.once('error', reject)
+    child.once('exit', (code) => {
+      resolve({ exitCode: code ?? 1, stderr })
+    })
+  })
 }

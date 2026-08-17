@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { auditArm64MachO } from './macho-audit.mjs'
+import { auditX64Pe } from './pe-audit.mjs'
 
 const ELECTRON_VERSION = '43.4.0'
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -26,30 +27,32 @@ const REPAIR_SCRIPT_SUFFIX = join(
  * @typedef {object} StagePlan
  * @property {string} runtimeDirectory Absolute deployment directory.
  * @property {string} repoRoot Absolute repository root.
+ * @property {{ platform: 'darwin', arch: 'arm64' } | { platform: 'win32', arch: 'x64' }} target Native target.
  * @property {StageCommand} verifyClosureCommand Runtime dependency closure command.
  * @property {StageCommand} deployCommand Production dependency deployment command.
  * @property {StageCommand} rebuildCommand Electron native-module rebuild command.
  */
 
 /**
- * Creates the fixed Apple Silicon staging paths and subprocess arguments.
+ * Creates the fixed native Desktop staging paths and subprocess arguments.
  *
- * @param {{ repoRoot: string, platform: NodeJS.Platform, arch: string, electronVersion: string }} input Target facts.
+ * @param {{ repoRoot: string, platform: NodeJS.Platform, arch: string, electronVersion: string, pnpmEntrypoint?: string }} input Target facts.
  * @returns {StagePlan} Deterministic staging plan.
  */
 export function createStagePlan(input) {
-  if (input.platform !== 'darwin' || input.arch !== 'arm64') {
-    throw new Error(`Unsupported desktop staging target: ${input.platform}-${input.arch}; expected darwin-arm64`)
-  }
+  const target = resolveStageTarget(input.platform, input.arch)
 
   const repoRoot = resolve(input.repoRoot)
   const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+  const pnpm = resolvePnpmInvocation(target, input.pnpmEntrypoint)
   return {
     runtimeDirectory,
     repoRoot,
+    target,
     verifyClosureCommand: {
-      executable: 'pnpm',
+      executable: pnpm.executable,
       args: [
+        ...pnpm.prefixArgs,
         'exec',
         'tsx',
         'scripts/verify-runtime-closure.ts',
@@ -59,9 +62,11 @@ export function createStagePlan(input) {
       cwd: repoRoot,
     },
     deployCommand: {
-      executable: 'pnpm',
+      executable: pnpm.executable,
       args: [
+        ...pnpm.prefixArgs,
         '--config.inject-workspace-packages=true',
+        ...(target.platform === 'win32' ? ['--config.node-linker=hoisted'] : []),
         '--ignore-scripts',
         '--frozen-lockfile',
         '--filter',
@@ -73,14 +78,16 @@ export function createStagePlan(input) {
       cwd: repoRoot,
     },
     rebuildCommand: {
-      executable: 'pnpm',
+      executable: pnpm.executable,
       args: [
+        ...pnpm.prefixArgs,
         'exec',
         'electron-rebuild',
         '--module-dir',
         runtimeDirectory,
+        ...(target.platform === 'win32' ? ['--platform', 'win32'] : []),
         '--arch',
-        'arm64',
+        target.arch,
         '--version',
         input.electronVersion,
       ],
@@ -103,7 +110,8 @@ export async function executeStagePlan(plan, options = {}) {
   await removeRuntimeDirectory(plan.runtimeDirectory)
   await runCommand(plan.deployCommand)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
-  await pruneUnsupportedNodePtyPrebuild(plan.runtimeDirectory)
+  if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
+  await pruneUnsupportedNodePtyPrebuild(plan.runtimeDirectory, plan.target)
   const repairScript = await findRepairScript(plan.runtimeDirectory)
   await runCommand({
     executable: process.execPath,
@@ -111,20 +119,24 @@ export async function executeStagePlan(plan, options = {}) {
     cwd: plan.runtimeDirectory,
   })
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
+  if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
   await runCommand(plan.rebuildCommand)
   await resolveCliEntryPath(plan.runtimeDirectory)
   await resolveWebFrontendIndex(plan.runtimeDirectory)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
-  await (options.auditRuntime ?? auditArm64MachO)(plan.runtimeDirectory)
+  if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
+  const auditRuntime = options.auditRuntime ?? (plan.target.platform === 'win32' ? auditX64Pe : auditArm64MachO)
+  await auditRuntime(plan.runtimeDirectory)
 }
 
 /**
- * Removes the dormant Intel node-pty prebuild from an Apple Silicon runtime.
+ * Keeps only the node-pty prebuilds supported by the native Desktop target.
  *
  * @param {string} runtimeDirectory Deployed Desktop runtime package root.
- * @returns {Promise<void>} Resolves after removing only the contained darwin-x64 directory.
+ * @param {{ platform: 'darwin', arch: 'arm64' } | { platform: 'win32', arch: 'x64' }} target Native target.
+ * @returns {Promise<void>} Resolves after validating the retained prebuild and removing unsupported ones.
  */
-export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory) {
+export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) {
   const canonicalRuntimeDirectory = await realpath(runtimeDirectory)
   let nodePtyPackage
   try {
@@ -156,26 +168,61 @@ export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory) {
 
   const nodePtyDirectory = dirname(nodePtyPackage)
   const prebuildsDirectory = join(nodePtyDirectory, 'prebuilds')
-  const arm64Directory = join(prebuildsDirectory, 'darwin-arm64')
-  const x64Directory = join(prebuildsDirectory, 'darwin-x64')
   await requireOrdinaryInternalDirectory(
     prebuildsDirectory,
     canonicalRuntimeDirectory,
     `Staged node-pty prebuilds must be an ordinary internal directory: ${prebuildsDirectory}`,
   )
+  if (target.platform === 'darwin') {
+    const arm64Directory = join(prebuildsDirectory, 'darwin-arm64')
+    const x64Directory = join(prebuildsDirectory, 'darwin-x64')
+    await requireOrdinaryInternalDirectory(
+      arm64Directory,
+      canonicalRuntimeDirectory,
+      `Staged node-pty darwin-arm64 prebuild must be an ordinary internal directory: ${arm64Directory}`,
+    )
+    await requireOrdinaryFile(join(arm64Directory, 'pty.node'), 'Staged node-pty darwin-arm64 pty.node is missing')
+    await requireOrdinaryFile(join(arm64Directory, 'spawn-helper'), 'Staged node-pty darwin-arm64 spawn-helper is missing')
+    await requireOrdinaryInternalDirectory(
+      x64Directory,
+      canonicalRuntimeDirectory,
+      `Staged node-pty darwin-x64 prebuild must be an ordinary internal directory: ${x64Directory}`,
+    )
+    await rm(x64Directory, { recursive: true })
+    return
+  }
+
+  const retainedDirectory = join(prebuildsDirectory, 'win32-x64')
   await requireOrdinaryInternalDirectory(
-    arm64Directory,
+    retainedDirectory,
     canonicalRuntimeDirectory,
-    `Staged node-pty darwin-arm64 prebuild must be an ordinary internal directory: ${arm64Directory}`,
+    `Staged node-pty win32-x64 prebuild must be an ordinary internal directory: ${retainedDirectory}`,
   )
-  await requireOrdinaryFile(join(arm64Directory, 'pty.node'), 'Staged node-pty darwin-arm64 pty.node is missing')
-  await requireOrdinaryFile(join(arm64Directory, 'spawn-helper'), 'Staged node-pty darwin-arm64 spawn-helper is missing')
-  await requireOrdinaryInternalDirectory(
-    x64Directory,
-    canonicalRuntimeDirectory,
-    `Staged node-pty darwin-x64 prebuild must be an ordinary internal directory: ${x64Directory}`,
-  )
-  await rm(x64Directory, { recursive: true })
+  for (const relativePath of [
+    'pty.node',
+    'conpty.node',
+    'conpty_console_list.node',
+    'conpty/conpty.dll',
+    'conpty/OpenConsole.exe',
+    'winpty.dll',
+    'winpty-agent.exe',
+  ]) {
+    await requireOrdinaryFile(
+      join(retainedDirectory, relativePath),
+      `Staged node-pty win32-x64 file is missing: ${relativePath}`,
+    )
+  }
+  const entries = await opendir(prebuildsDirectory)
+  for await (const entry of entries) {
+    if (entry.name === 'win32-x64') continue
+    const path = join(prebuildsDirectory, entry.name)
+    await requireOrdinaryInternalDirectory(
+      path,
+      canonicalRuntimeDirectory,
+      `Staged unsupported node-pty prebuild must be an ordinary internal directory: ${path}`,
+    )
+    await rm(path, { recursive: true })
+  }
 }
 
 /** @param {NodeJS.Require} packageRequire @param {string} specifier @param {string} canonicalRuntimeDirectory */
@@ -344,10 +391,46 @@ export async function assertRuntimeSymlinksContained(runtimeDirectory) {
   }
 }
 
+/**
+ * Rejects every filesystem link from the Windows runtime shipped to end users.
+ *
+ * @param {string} runtimeDirectory Windows tree root.
+ * @param {string} [label] Human-readable tree label for failures.
+ * @returns {Promise<void>} Resolves when every entry is an ordinary file or directory.
+ */
+export async function assertRuntimeContainsNoLinks(runtimeDirectory, label = 'Windows runtime') {
+  if ((await lstat(runtimeDirectory)).isSymbolicLink()) {
+    throw new Error(`${label} contains a filesystem link: ${runtimeDirectory}`)
+  }
+  for await (const path of walk(runtimeDirectory)) {
+    if ((await lstat(path)).isSymbolicLink()) {
+      throw new Error(`${label} contains a filesystem link: ${path}`)
+    }
+  }
+}
+
+export { auditX64Pe }
+
 /** @param {string} parent @param {string} candidate */
 function contains(parent, candidate) {
   const fromParent = relative(parent, candidate)
   return fromParent === '' || (!fromParent.startsWith(`..${sep}`) && fromParent !== '..' && !isAbsolute(fromParent))
+}
+
+/** @param {NodeJS.Platform} platform @param {string} arch */
+function resolveStageTarget(platform, arch) {
+  if (platform === 'darwin' && arch === 'arm64') return { platform, arch }
+  if (platform === 'win32' && arch === 'x64') return { platform, arch }
+  throw new Error(`Unsupported desktop staging target: ${platform}-${arch}; expected darwin-arm64 or win32-x64`)
+}
+
+/** @param {{ platform: 'darwin' | 'win32' }} target @param {string | undefined} pnpmEntrypoint */
+function resolvePnpmInvocation(target, pnpmEntrypoint) {
+  if (target.platform === 'darwin') return { executable: 'pnpm', prefixArgs: [] }
+  if (pnpmEntrypoint === undefined || pnpmEntrypoint === '') {
+    throw new Error('Windows desktop staging requires npm_execpath; invoke it through a pnpm package script')
+  }
+  return { executable: process.execPath, prefixArgs: [pnpmEntrypoint] }
 }
 
 /** @param {string} directory */
@@ -389,6 +472,7 @@ if (isMain) {
     platform: process.platform,
     arch: process.arch,
     electronVersion: ELECTRON_VERSION,
+    pnpmEntrypoint: process.env.npm_execpath,
   })
   await executeStagePlan(plan)
 }

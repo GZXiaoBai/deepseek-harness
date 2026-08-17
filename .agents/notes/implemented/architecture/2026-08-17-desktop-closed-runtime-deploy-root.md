@@ -6,17 +6,17 @@ English | [中文](2026-08-17-desktop-closed-runtime-deploy-root.zh.md)
 
 ## Problem
 
-The public `@deepseek-ai/dsh` manifest describes the installable CLI, not every peer supplied by a concrete host. A pnpm injected deployment materializes workspace packages as isolated package entries, so peer imports used by the assembled CLI and Web plugin graph cannot rely on the development checkout's hoisted `node_modules`. Adding every deployment peer to the public CLI would make one macOS host's composition part of the general CLI package.
+The public `@deepseek-ai/dsh` manifest describes the installable CLI, not every peer supplied by a concrete host. A pnpm deployment materializes workspace packages outside their development layout, so peer imports used by the assembled CLI and Web plugin graph cannot rely on the checkout's root `node_modules`. Adding every deployment peer to the public CLI would make one Desktop host's composition part of the general CLI package.
 
-Legacy deployment is not a standalone alternative: its workspace symlinks resolve into the checkout, and it omits parts of the Web frontend closure. Running every dependency lifecycle script during deployment also executes unrelated denied scripts, while the macOS subprocess provider needs one reviewed permission repair.
+Legacy deployment is not a standalone macOS alternative: its workspace symlinks resolve into the checkout, and it omits parts of the Web frontend closure. Running every dependency lifecycle script during deployment also executes unrelated denied scripts, while the subprocess provider needs one reviewed permission repair. Windows additionally requires a hoisted, link-free runtime because the installed application cannot depend on Developer Mode, administrator-created links, or the source checkout.
 
 The Web composition mounts Cordis HMR. Under Electron's embedded Node runtime, HMR needs access to Node's internal ESM loader, but the Electron main process and renderer do not need that access.
 
 ## Decision
 
-`apps/desktop/runtime/package.json` is a private dependency-only workspace and the deploy root for the macOS Desktop application. It depends on `@deepseek-ai/dsh` and directly supplies every non-optional workspace peer reachable through the CLI and Web dependency graph. `scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json` traverses app, package, and vendor manifests and rejects any missing required peer; Desktop build and staging execute that check.
+`apps/desktop/runtime/package.json` is a private dependency-only workspace and the deploy root for both supported Desktop targets. It depends on `@deepseek-ai/dsh` and directly supplies every non-optional workspace peer reachable through the CLI and Web dependency graph. `scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json` traverses app, package, and vendor manifests and rejects any missing required peer; Desktop build and staging execute that check.
 
-Staging deploys `@deepseek-ai/dsh-desktop-runtime` from the frozen lockfile with injected workspace packages and dependency lifecycle scripts disabled. Before executing staged code, it audits every symlink target and requires the `@deepseek-ai/dsh-subprocess-local` permission repair to be a regular internal file rather than a symlink. It executes only that repair, runs Electron rebuild for the target Electron version and architecture, and repeats the containment audit after staged mutations. CLI and frontend paths resolve through package relationships rooted at the deployed runtime.
+Staging deploys `@deepseek-ai/dsh-desktop-runtime` from the frozen lockfile with injected workspace packages and dependency lifecycle scripts disabled. macOS retains contained pnpm links; Windows uses the hoisted linker and rejects every symbolic link, junction, or other reparse point. Before executing staged code, staging requires the `@deepseek-ai/dsh-subprocess-local` permission repair to be a regular internal file rather than a link. It executes only that repair, runs Electron rebuild for the native platform and architecture, prunes unsupported `node-pty` prebuilds, and repeats the platform containment audit after staged mutations. CLI and frontend paths resolve through package relationships rooted at the deployed runtime.
 
 The Desktop Harness backend child receives `--expose-internals` only when `ELECTRON_RUN_AS_NODE=1`. Plain Node launches do not receive it. The Electron main process argv and renderer preferences remain unchanged; the renderer keeps context isolation, sandboxing, and Node integration disabled.
 
@@ -34,5 +34,5 @@ Standalone runtime verification shutdown signals only the verifier's detached ne
 
 - Desktop runtime peer ownership is explicit and mechanically closed without widening the public CLI manifest.
 - The deploy root duplicates required peer names by design; the closure verifier, rather than manual smoke-test iteration, owns freshness.
-- Staged native compatibility is accepted by real Electron loading and exercise. `electron-rebuild` may report no modules when compatible darwin-arm64 N-API prebuilds ship in the closure.
-- The runtime smoke verifies native loading, CLI version, the strict loopback URL, HTTP status and title, owned-group shutdown, TCP connection refusal on the closed port, and absence of checkout-resolving symlinks.
+- Staged native compatibility is accepted by real Electron loading and exercise. `electron-rebuild` may report no modules when compatible target prebuilds ship in the closure.
+- The runtime smoke verifies native loading, CLI version, the strict loopback URL, HTTP status and title, target-specific owned-tree shutdown, TCP connection refusal on the closed port, and the platform link policy. macOS audits arm64 Mach-O objects; Windows audits x64 PE objects and requires a link-free runtime.
