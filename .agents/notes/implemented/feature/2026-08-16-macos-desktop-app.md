@@ -12,6 +12,8 @@ DeepSeek Harness presents its browser interface through the Host/Web composition
 
 `@deepseek-ai/dsh-desktop` is an Electron wrapper for Apple Silicon Macs running macOS 14 or later. It starts the staged `@deepseek-ai/dsh` CLI as one detached backend process with fixed `web --host 127.0.0.1 --port 0` arguments, waits for its strict loopback URL and HTTP health response, then opens that same origin in the application window. `@deepseek-ai/dsh-host-webserver` retains HTTP serving, API routing, frontend delivery, and browser-visible startup responsibilities under the [GUI layering decision](../architecture/2026-07-19-gui-layering-and-rpc-protocol.md).
 
+The [Windows desktop decision](2026-08-17-windows-desktop-app.md) reuses this wrapper and its Web, renderer, navigation, data-separation, and single-instance boundaries while replacing only target-specific process-tree, staging, binary-audit, and installer behavior.
+
 A `file://` application with an IPC-backed host remains a separate architecture. It must replace the HTTP server's asset, request, lifecycle, and security responsibilities before it can replace loopback HTTP; the two transports are not aliases.
 
 ## Security and runtime boundaries

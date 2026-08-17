@@ -12,6 +12,8 @@ DeepSeek Harness 通过 Host/Web 组合提供浏览器界面。希望获得应�
 
 `@deepseek-ai/dsh-desktop` 是一个面向搭载 macOS 14 或更高版本的 Apple Silicon Mac 的 Electron 包装层。它使用固定的 `web --host 127.0.0.1 --port 0` 参数，把已暂存的 `@deepseek-ai/dsh` CLI（命令行界面）作为一个分离式后端进程启动，等待获得严格的回环 URL 与 HTTP 健康响应，再在应用窗口中打开同一来源。`@deepseek-ai/dsh-host-webserver` 按 [GUI 分层决策](../architecture/2026-07-19-gui-layering-and-rpc-protocol.md)继续拥有 HTTP 服务、API 路由、前端交付以及浏览器可见启动职责。
 
+[Windows 桌面决策](2026-08-17-windows-desktop-app.md)复用这个包装层及其 Web、渲染器、导航、数据分离与单实例边界，只替换目标特定的进程树、暂存、二进制审计和安装程序行为。
+
 采用 `file://` 且由 IPC 支持 host 的应用仍属于一套独立架构。它必须替代 HTTP 服务器的资源、请求、生命周期和安全职责，才能替代回环 HTTP；两种传输方式并非别名关系。
 
 ## 安全与运行时边界

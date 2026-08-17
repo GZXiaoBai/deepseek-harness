@@ -3,6 +3,8 @@ import { lstat, rm, unlink } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+export { createWindowsIco } from './icon-format.mjs'
+
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 
 /**
@@ -21,18 +23,17 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
  */
 
 /**
- * Creates the fixed local Apple Silicon packaging plan.
+ * Creates the fixed host-native Desktop packaging plan.
  *
- * @param {{ repoRoot: string, platform: NodeJS.Platform, arch: string }} input Host and checkout facts.
+ * @param {{ repoRoot: string, platform: NodeJS.Platform, arch: string, pnpmEntrypoint?: string }} input Host and checkout facts.
  * @returns {PackagePlan} Deterministic packaging paths and commands.
  */
 export function createPackagePlan(input) {
-  if (input.platform !== 'darwin' || input.arch !== 'arm64') {
-    throw new Error(`Unsupported desktop packaging target: ${input.platform}-${input.arch}; expected darwin-arm64`)
-  }
+  const target = resolvePackageTarget(input.platform, input.arch)
 
   const repoRoot = resolve(input.repoRoot)
   const desktopDirectory = join(repoRoot, 'apps/desktop')
+  const pnpm = resolvePnpmInvocation(target, input.pnpmEntrypoint)
   return {
     repoRoot,
     releaseDirectory: join(desktopDirectory, 'release'),
@@ -53,22 +54,47 @@ export function createPackagePlan(input) {
         cwd: repoRoot,
       },
       {
-        executable: 'pnpm',
+        executable: pnpm.executable,
         args: [
+          ...pnpm.prefixArgs,
           'exec',
           'electron-builder',
           '--config',
           join(desktopDirectory, 'electron-builder.yml'),
-          '--mac',
-          '--arm64',
+          target.platform === 'win32' ? '--win' : '--mac',
+          target.arch === 'x64' ? '--x64' : '--arm64',
           '--publish',
           'never',
         ],
         cwd: desktopDirectory,
-        environment: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
+        environment: target.platform === 'win32'
+          ? {
+              CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+              CSC_KEY_PASSWORD: '',
+              CSC_LINK: '',
+              WIN_CSC_KEY_PASSWORD: '',
+              WIN_CSC_LINK: '',
+            }
+          : { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
       },
     ],
   }
+}
+
+/** @param {NodeJS.Platform} platform @param {string} arch */
+function resolvePackageTarget(platform, arch) {
+  if (platform === 'darwin' && arch === 'arm64') return { platform, arch }
+  if (platform === 'win32' && arch === 'x64') return { platform, arch }
+  throw new Error(`Unsupported desktop packaging target: ${platform}-${arch}; expected darwin-arm64 or win32-x64`)
+}
+
+/** @param {{ platform: 'darwin' | 'win32' }} target @param {string | undefined} pnpmEntrypoint */
+function resolvePnpmInvocation(target, pnpmEntrypoint) {
+  if (target.platform === 'darwin') return { executable: 'pnpm', prefixArgs: [] }
+  if (pnpmEntrypoint === undefined || pnpmEntrypoint === '') {
+    throw new Error('Windows desktop packaging requires npm_execpath; invoke it through a pnpm package script')
+  }
+  return { executable: process.execPath, prefixArgs: [pnpmEntrypoint] }
 }
 
 /**
@@ -139,5 +165,6 @@ if (isMain) {
     repoRoot: REPOSITORY_ROOT,
     platform: process.platform,
     arch: process.arch,
+    pnpmEntrypoint: process.env.npm_execpath,
   }))
 }

@@ -26,3 +26,20 @@ mac:
   notarize: false
 dmg:
   sign: false
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: dir
+      arch: [x64]
+nsis:
+  artifactName: DeepSeek Harness Setup ${version}-${arch}.${ext}
+  oneClick: true
+  perMachine: false
+  allowElevation: false
+  createStartMenuShortcut: true
+  createDesktopShortcut: false
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false
+  packElevateHelper: false

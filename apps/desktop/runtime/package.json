@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-desktop-runtime",
-  "description": "Private deploy root defining the standalone macOS Desktop runtime closure",
+  "description": "Private deploy root defining the standalone Desktop runtime closure",
   "version": "0.1.0-rc.5",
   "private": true,
   "type": "module",

@@ -32,7 +32,7 @@ interface PackagePlan {
 }
 
 interface PackageModule {
-  createPackagePlan(input: { repoRoot: string; platform: NodeJS.Platform; arch: string }): PackagePlan
+  createPackagePlan(input: { repoRoot: string; platform: NodeJS.Platform; arch: string; pnpmEntrypoint?: string }): PackagePlan
   executePackagePlan(plan: PackagePlan, options: { runCommand(command: PackageCommand): Promise<void> }): Promise<void>
 }
 
@@ -68,6 +68,7 @@ interface AfterPackPlan {
   sourceRuntime: string
   appPath: string
   destinationRuntime: string
+  target?: { platform: 'darwin'; arch: 'arm64' } | { platform: 'win32'; arch: 'x64' }
 }
 
 interface AfterPackModule {
@@ -111,9 +112,45 @@ interface BuilderConfig {
     entitlementsInherit?: string
     notarize?: unknown
   }
+  win?: {
+    icon?: string
+    target?: Array<{ target?: string; arch?: string[] }>
+  }
+  nsis?: {
+    artifactName?: string
+    oneClick?: boolean
+    perMachine?: boolean
+    allowElevation?: boolean
+    createStartMenuShortcut?: boolean
+    createDesktopShortcut?: boolean
+    runAfterFinish?: boolean
+    deleteAppDataOnUninstall?: boolean
+    packElevateHelper?: boolean
+  }
 }
 
 describe('desktop package configuration', () => {
+  it('wraps the generated 256px PNG as a Windows icon image', async () => {
+    const packageModule = await import(packageScriptUrl) as Record<string, unknown>
+    const createWindowsIco = Reflect.get(packageModule, 'createWindowsIco') as
+      | ((png: Buffer) => Buffer)
+      | undefined
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x42])
+
+    expect(createWindowsIco).toBeTypeOf('function')
+    const icon = createWindowsIco?.(png)
+
+    expect(icon?.readUInt16LE(0)).toBe(0)
+    expect(icon?.readUInt16LE(2)).toBe(1)
+    expect(icon?.readUInt16LE(4)).toBe(1)
+    expect(icon?.subarray(6, 8)).toEqual(Buffer.from([0, 0]))
+    expect(icon?.readUInt16LE(10)).toBe(1)
+    expect(icon?.readUInt16LE(12)).toBe(32)
+    expect(icon?.readUInt32LE(14)).toBe(png.length)
+    expect(icon?.readUInt32LE(18)).toBe(22)
+    expect(icon?.subarray(22)).toEqual(png)
+  })
+
   it('builds only a private arm64 App and DMG with the staged runtime', async () => {
     const config = parse(await readFile(join(desktopRoot, 'electron-builder.yml'), 'utf8')) as BuilderConfig
 
@@ -152,15 +189,92 @@ describe('desktop package configuration', () => {
     ])
   })
 
+  it('builds an unsigned one-click per-user Windows x64 NSIS installer', async () => {
+    const config = parse(await readFile(join(desktopRoot, 'electron-builder.yml'), 'utf8')) as BuilderConfig
+
+    expect(config).toMatchObject({
+      win: {
+        icon: 'build/icon.ico',
+        target: [
+          { target: 'nsis', arch: ['x64'] },
+          { target: 'dir', arch: ['x64'] },
+        ],
+      },
+      nsis: {
+        artifactName: 'DeepSeek Harness Setup ${version}-${arch}.${ext}',
+        oneClick: true,
+        perMachine: false,
+        allowElevation: false,
+        createStartMenuShortcut: true,
+        createDesktopShortcut: false,
+        runAfterFinish: false,
+        deleteAppDataOnUninstall: false,
+        packElevateHelper: false,
+      },
+    })
+    expect(JSON.stringify(config.win)).not.toMatch(/certificate|sign/i)
+  })
+
   it.each([
     ['linux', 'arm64'],
     ['darwin', 'x64'],
-    ['win32', 'x64'],
+    ['win32', 'arm64'],
   ] as const)('rejects packaging on %s-%s', async (platform, arch) => {
     const packageModule = await loadPackageModule()
 
     expect(() => packageModule.createPackagePlan({ repoRoot: '/checkout', platform, arch }))
-      .toThrow(`Unsupported desktop packaging target: ${platform}-${arch}; expected darwin-arm64`)
+      .toThrow(`Unsupported desktop packaging target: ${platform}-${arch}; expected darwin-arm64 or win32-x64`)
+  })
+
+  it('runs the native Windows icon, staging, runtime verification, and unsigned x64 builder commands', async () => {
+    const packageModule = await loadPackageModule()
+    const pnpmEntrypoint = '/pnpm.cjs'
+    const plan = packageModule.createPackagePlan({
+      repoRoot: '/checkout',
+      platform: 'win32',
+      arch: 'x64',
+      pnpmEntrypoint,
+    })
+
+    expect(plan.commands).toEqual([
+      {
+        executable: process.execPath,
+        args: ['/checkout/apps/desktop/scripts/build-icon.mjs'],
+        cwd: '/checkout',
+      },
+      {
+        executable: process.execPath,
+        args: ['/checkout/apps/desktop/scripts/stage-runtime.mjs'],
+        cwd: '/checkout',
+      },
+      {
+        executable: process.execPath,
+        args: ['/checkout/apps/desktop/scripts/verify-runtime.mjs'],
+        cwd: '/checkout',
+      },
+      {
+        executable: process.execPath,
+        args: [
+          pnpmEntrypoint,
+          'exec',
+          'electron-builder',
+          '--config',
+          '/checkout/apps/desktop/electron-builder.yml',
+          '--win',
+          '--x64',
+          '--publish',
+          'never',
+        ],
+        cwd: '/checkout/apps/desktop',
+        environment: {
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+          CSC_KEY_PASSWORD: '',
+          CSC_LINK: '',
+          WIN_CSC_KEY_PASSWORD: '',
+          WIN_CSC_LINK: '',
+        },
+      },
+    ])
   })
 
   it('runs only the deterministic icon, staging, runtime verification, and arm64 builder commands', async () => {
@@ -400,7 +514,9 @@ describe('desktop package configuration', () => {
       electronPlatformName,
       arch,
       appOutDir: '/checkout/apps/desktop/release/mac-arm64',
-    })).toThrow(`Unsupported Desktop afterPack target: ${electronPlatformName}-${String(arch)}; expected darwin-arm64`)
+    })).toThrow(
+      `Unsupported Desktop afterPack target: ${electronPlatformName}-${String(arch)}; expected darwin-arm64 or win32-x64`,
+    )
   })
 
   it('copies the runtime to the exact App resource path and preserves contained relative pnpm links', async () => {
@@ -422,13 +538,49 @@ describe('desktop package configuration', () => {
       appOutDir,
     })
 
-    expect(plan).toEqual({ desktopRoot: desktopDirectory, sourceRuntime, appPath, destinationRuntime })
+    expect(plan).toEqual({
+      desktopRoot: desktopDirectory,
+      sourceRuntime,
+      appPath,
+      destinationRuntime,
+      target: { platform: 'darwin', arch: 'arm64' },
+    })
     await afterPackModule.copyRuntimeForPackage(plan)
 
     await expect(readFile(join(destinationRuntime, 'stale.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readlink(join(destinationRuntime, 'node_modules/@deepseek-ai/dsh'))).toBe(sourceLink)
     expect(await realpath(join(destinationRuntime, 'node_modules/@deepseek-ai/dsh/lib/bin.js')))
       .toMatch(`${destinationRuntime}/node_modules/.pnpm/`)
+  })
+
+  it('copies a link-free runtime into the exact Windows unpacked resources directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-after-pack-windows-'))
+    directories.push(root)
+    const desktopDirectory = join(root, 'apps/desktop')
+    const sourceRuntime = join(desktopDirectory, '.runtime')
+    const appOutDir = join(desktopDirectory, 'release/win-unpacked')
+    const destinationRuntime = join(appOutDir, 'resources/runtime')
+    await createHoistedHookRuntime(sourceRuntime)
+    await mkdir(appOutDir, { recursive: true })
+    const afterPackModule = await loadAfterPackModule()
+
+    const plan = afterPackModule.createAfterPackPlan({
+      desktopRoot: desktopDirectory,
+      electronPlatformName: 'win32',
+      arch: 1,
+      appOutDir,
+    })
+
+    expect(plan).toEqual({
+      desktopRoot: desktopDirectory,
+      sourceRuntime,
+      appPath: appOutDir,
+      destinationRuntime,
+      target: { platform: 'win32', arch: 'x64' },
+    })
+    await afterPackModule.copyRuntimeForPackage(plan)
+    await expect(readFile(join(destinationRuntime, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), 'utf8'))
+      .resolves.toBe('')
   })
 
   it('rejects an escaping source symlink before replacing the packaged runtime', async () => {
@@ -552,6 +704,32 @@ async function createHookRuntime(runtimeDirectory: string): Promise<string> {
   await symlink('../../../web-app/node_modules/@deepseek-ai/dsh-web-app', join(dirname(dsh), 'dsh-web-app'))
   await symlink('../../../frontend/node_modules/@deepseek-ai/dsh-web-frontend', join(dirname(webApp), 'dsh-web-frontend'))
   return dshLink
+}
+
+async function createHoistedHookRuntime(runtimeDirectory: string): Promise<void> {
+  await mkdir(runtimeDirectory, { recursive: true })
+  await writeFile(join(runtimeDirectory, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-desktop-runtime' }))
+  const scope = join(runtimeDirectory, 'node_modules/@deepseek-ai')
+  const dsh = join(scope, 'dsh')
+  const webApp = join(scope, 'dsh-web-app')
+  const frontend = join(scope, 'dsh-web-frontend')
+  await mkdir(join(dsh, 'lib'), { recursive: true })
+  await mkdir(webApp, { recursive: true })
+  await mkdir(join(frontend, 'dist'), { recursive: true })
+  await writeFile(join(dsh, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh',
+    dependencies: { '@deepseek-ai/dsh-web-app': 'workspace:^' },
+  }))
+  await writeFile(join(dsh, 'lib/bin.js'), '')
+  await writeFile(join(webApp, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-web-app',
+    dependencies: { '@deepseek-ai/dsh-web-frontend': 'workspace:^' },
+  }))
+  await writeFile(join(frontend, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-web-frontend',
+    exports: { './dist/*': './dist/*' },
+  }))
+  await writeFile(join(frontend, 'dist/index.html'), '<title>DeepSeek Harness</title>')
 }
 
 const APPROVED_ENTITLEMENTS = [

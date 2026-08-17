@@ -16,6 +16,16 @@ interface ProcessGroupModule {
     retryMs?: number
     connectTimeoutMs?: number
   }) => Promise<void>
+  terminateOwnedWindowsProcessTree: (options: {
+    leaderPid: number
+    exit: Promise<unknown>
+    leaderExited: () => boolean
+    runTaskkill?: (
+      executable: string,
+      args: readonly string[],
+      options: { shell: false; windowsHide: true },
+    ) => Promise<{ exitCode: number; stderr: string }>
+  }) => Promise<void>
 }
 
 const moduleUrl = pathToFileURL(`${import.meta.dirname}/../scripts/process-group.mjs`).href
@@ -132,5 +142,66 @@ describe('owned process-group cleanup', () => {
 
     expect(signals).toContain('SIGKILL')
     expect(descendantAlive).toBe(false)
+  })
+
+  it('terminates the exact owned Windows process tree without a shell', async () => {
+    let exited = false
+    const calls: unknown[][] = []
+    const { terminateOwnedWindowsProcessTree } = await loadProcessGroup()
+
+    await terminateOwnedWindowsProcessTree({
+      leaderPid: 45,
+      exit: Promise.resolve().then(() => { exited = true }),
+      leaderExited: () => exited,
+      runTaskkill: async (...args) => {
+        calls.push(args)
+        return { exitCode: 0, stderr: '' }
+      },
+    })
+
+    expect(calls).toEqual([[
+      'taskkill.exe',
+      ['/PID', '45', '/T', '/F'],
+      { shell: false, windowsHide: true },
+    ]])
+  })
+
+  it('surfaces taskkill failure while the owned Windows leader remains alive', async () => {
+    const { terminateOwnedWindowsProcessTree } = await loadProcessGroup()
+
+    await expect(terminateOwnedWindowsProcessTree({
+      leaderPid: 46,
+      exit: new Promise(() => {}),
+      leaderExited: () => false,
+      runTaskkill: async () => ({ exitCode: 5, stderr: 'Access is denied.' }),
+    })).rejects.toThrow('taskkill.exe exited with code 5: Access is denied.')
+  })
+
+  it('does not mask a taskkill cleanup failure when the Windows leader exits during the command', async () => {
+    let exited = false
+    const { terminateOwnedWindowsProcessTree } = await loadProcessGroup()
+
+    await expect(terminateOwnedWindowsProcessTree({
+      leaderPid: 47,
+      exit: Promise.resolve(),
+      leaderExited: () => exited,
+      runTaskkill: async () => {
+        exited = true
+        return { exitCode: 5, stderr: 'Access is denied.' }
+      },
+    })).rejects.toThrow('taskkill.exe exited with code 5: Access is denied.')
+  })
+
+  it('does not invoke taskkill after the owned Windows leader was already observed as exited', async () => {
+    const runTaskkill = vi.fn(async () => ({ exitCode: 128, stderr: 'not found' }))
+    const { terminateOwnedWindowsProcessTree } = await loadProcessGroup()
+
+    await expect(terminateOwnedWindowsProcessTree({
+      leaderPid: 48,
+      exit: Promise.resolve(),
+      leaderExited: () => true,
+      runTaskkill,
+    })).resolves.toBeUndefined()
+    expect(runTaskkill).not.toHaveBeenCalled()
   })
 })

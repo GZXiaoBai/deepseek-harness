@@ -12,6 +12,8 @@ interface StageCommand {
 
 interface StagePlan {
   readonly runtimeDirectory: string
+  readonly deployCommand: StageCommand
+  readonly rebuildCommand: StageCommand
 }
 
 interface StageRuntimeModule {
@@ -20,6 +22,7 @@ interface StageRuntimeModule {
     platform: NodeJS.Platform
     arch: string
     electronVersion: string
+    pnpmEntrypoint?: string
   }) => StagePlan
   executeStagePlan: (
     plan: StagePlan,
@@ -28,7 +31,12 @@ interface StageRuntimeModule {
       auditRuntime?: (runtimeDirectory: string) => Promise<void>
     },
   ) => Promise<void>
-  pruneUnsupportedNodePtyPrebuild: (runtimeDirectory: string) => Promise<void>
+  pruneUnsupportedNodePtyPrebuild: (
+    runtimeDirectory: string,
+    target: Readonly<{ platform: 'darwin'; arch: 'arm64' } | { platform: 'win32'; arch: 'x64' }>,
+  ) => Promise<void>
+  assertRuntimeContainsNoLinks: (runtimeDirectory: string) => Promise<void>
+  auditX64Pe: (runtimeDirectory: string) => Promise<readonly string[]>
 }
 
 const stageScriptUrl = pathToFileURL(join(import.meta.dirname, '../scripts/stage-runtime.mjs')).href
@@ -98,11 +106,21 @@ async function createNativeClosure(runtimeDirectory: string, dsh: string): Promi
   await symlink(subprocessLocal, join(dirname(base), 'dsh-subprocess-local'))
   await mkdir(join(nodePty, 'prebuilds/darwin-arm64'), { recursive: true })
   await mkdir(join(nodePty, 'prebuilds/darwin-x64'), { recursive: true })
+  await mkdir(join(nodePty, 'prebuilds/win32-arm64'), { recursive: true })
+  await mkdir(join(nodePty, 'prebuilds/win32-x64/conpty'), { recursive: true })
   await writeFile(join(nodePty, 'package.json'), JSON.stringify({ name: 'node-pty', version: '1.1.0' }))
   await writeFile(join(nodePty, 'prebuilds/darwin-arm64/pty.node'), 'arm64 pty')
   await writeFile(join(nodePty, 'prebuilds/darwin-arm64/spawn-helper'), 'arm64 helper')
   await writeFile(join(nodePty, 'prebuilds/darwin-x64/pty.node'), 'x64 pty')
   await writeFile(join(nodePty, 'prebuilds/darwin-x64/spawn-helper'), 'x64 helper')
+  await writeFile(join(nodePty, 'prebuilds/win32-arm64/pty.node'), 'arm64 windows pty')
+  await writeFile(join(nodePty, 'prebuilds/win32-x64/pty.node'), 'x64 windows pty')
+  await writeFile(join(nodePty, 'prebuilds/win32-x64/conpty.node'), 'x64 conpty')
+  await writeFile(join(nodePty, 'prebuilds/win32-x64/conpty_console_list.node'), 'x64 console list')
+  await writeFile(join(nodePty, 'prebuilds/win32-x64/conpty/conpty.dll'), 'x64 conpty dll')
+  await writeFile(join(nodePty, 'prebuilds/win32-x64/conpty/OpenConsole.exe'), 'x64 console')
+  await writeFile(join(nodePty, 'prebuilds/win32-x64/winpty.dll'), 'x64 winpty dll')
+  await writeFile(join(nodePty, 'prebuilds/win32-x64/winpty-agent.exe'), 'x64 winpty agent')
   await symlink(nodePty, join(dirname(dirname(subprocessLocal)), 'node-pty'))
   const repairScript = join(subprocessLocal, 'scripts/ensure-spawn-helper.mjs')
   await writeFile(repairScript, '')
@@ -137,15 +155,27 @@ async function createWebClosure(runtimeDirectory: string, dsh: string): Promise<
   await symlink(webApp, join(dirname(dsh), 'dsh-web-app'))
 }
 
-function nodePtyPrebuild(runtimeDirectory: string, architecture: 'darwin-arm64' | 'darwin-x64'): string {
+function nodePtyPrebuild(
+  runtimeDirectory: string,
+  architecture: 'darwin-arm64' | 'darwin-x64' | 'win32-arm64' | 'win32-x64',
+): string {
   return join(runtimeDirectory, 'node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/prebuilds', architecture)
+}
+
+function peFixture(machine: number): Buffer {
+  const bytes = Buffer.alloc(0x90)
+  bytes.write('MZ', 0, 'ascii')
+  bytes.writeUInt32LE(0x80, 0x3c)
+  bytes.write('PE\0\0', 0x80, 'binary')
+  bytes.writeUInt16LE(machine, 0x84)
+  return bytes
 }
 
 describe('desktop runtime staging', () => {
   it.each([
     ['linux', 'arm64'],
     ['darwin', 'x64'],
-    ['win32', 'x64'],
+    ['win32', 'arm64'],
   ] as const)('rejects the unsupported %s-%s target', async (platform, arch) => {
     const { createStagePlan } = await loadStageRuntime()
 
@@ -154,7 +184,54 @@ describe('desktop runtime staging', () => {
       platform,
       arch,
       electronVersion: '43.4.0',
-    })).toThrow(`Unsupported desktop staging target: ${platform}-${arch}; expected darwin-arm64`)
+    })).toThrow(`Unsupported desktop staging target: ${platform}-${arch}; expected darwin-arm64 or win32-x64`)
+  })
+
+  it('builds a shell-free hoisted Windows x64 deployment plan', async () => {
+    const { createStagePlan } = await loadStageRuntime()
+    const pnpmEntrypoint = '/pnpm.cjs'
+
+    const plan = createStagePlan({
+      repoRoot: 'C:\\checkout',
+      platform: 'win32',
+      arch: 'x64',
+      electronVersion: '43.4.0',
+      pnpmEntrypoint,
+    })
+
+    expect(plan.deployCommand).toEqual({
+      executable: process.execPath,
+      args: [
+        pnpmEntrypoint,
+        '--config.inject-workspace-packages=true',
+        '--config.node-linker=hoisted',
+        '--ignore-scripts',
+        '--frozen-lockfile',
+        '--filter',
+        '@deepseek-ai/dsh-desktop-runtime',
+        '--prod',
+        'deploy',
+        plan.runtimeDirectory,
+      ],
+      cwd: plan.deployCommand.cwd,
+    })
+    expect(plan.rebuildCommand).toEqual({
+      executable: process.execPath,
+      args: [
+        pnpmEntrypoint,
+        'exec',
+        'electron-rebuild',
+        '--module-dir',
+        plan.runtimeDirectory,
+        '--platform',
+        'win32',
+        '--arch',
+        'x64',
+        '--version',
+        '43.4.0',
+      ],
+      cwd: plan.rebuildCommand.cwd,
+    })
   })
 
   it('orders closure verification, script-free deploy, the one staged permission repair, and Electron rebuild', async () => {
@@ -236,7 +313,7 @@ describe('desktop runtime staging', () => {
     await createRuntimeClosure(runtimeDirectory)
     const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
 
-    await pruneUnsupportedNodePtyPrebuild(runtimeDirectory)
+    await pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })
 
     await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'pty.node'), 'utf8')).resolves.toBe('arm64 pty')
@@ -256,7 +333,7 @@ describe('desktop runtime staging', () => {
     await symlink(externalDirectory, x64Prebuild)
     const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
 
-    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory)).rejects.toThrow(
+    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })).rejects.toThrow(
       'Staged node-pty darwin-x64 prebuild must be an ordinary internal directory:',
     )
     await expect(readFile(marker, 'utf8')).resolves.toBe('keep')
@@ -271,9 +348,79 @@ describe('desktop runtime staging', () => {
     await writeFile(x64Prebuild, 'not a directory')
     const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
 
-    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory)).rejects.toThrow(
+    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })).rejects.toThrow(
       'Staged node-pty darwin-x64 prebuild must be an ordinary internal directory:',
     )
+  })
+
+  it('keeps only the Windows x64 node-pty prebuild for a Windows runtime', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await createRuntimeClosure(runtimeDirectory)
+    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+
+    await pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'win32', arch: 'x64' })
+
+    await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'win32-x64'), 'conpty.node'), 'utf8'))
+      .resolves.toBe('x64 conpty')
+    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'win32-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects any link in a Windows runtime that would require Developer Mode', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await mkdir(join(runtimeDirectory, 'node_modules'), { recursive: true })
+    await writeFile(join(runtimeDirectory, 'package.json'), '{}')
+    await symlink(join(runtimeDirectory, 'package.json'), join(runtimeDirectory, 'node_modules/package-link'))
+    const { assertRuntimeContainsNoLinks } = await loadStageRuntime()
+
+    await expect(assertRuntimeContainsNoLinks(runtimeDirectory)).rejects.toThrow(
+      `Windows runtime contains a filesystem link: ${join(runtimeDirectory, 'node_modules/package-link')}`,
+    )
+  })
+
+  it('rejects a linked Windows runtime root before traversing its contents', async () => {
+    const repoRoot = await makeRepository()
+    const externalRuntime = await mkdtemp(join(tmpdir(), 'dsh-windows-runtime-root-'))
+    directories.push(externalRuntime)
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await symlink(externalRuntime, runtimeDirectory)
+    const { assertRuntimeContainsNoLinks } = await loadStageRuntime()
+
+    await expect(assertRuntimeContainsNoLinks(runtimeDirectory)).rejects.toThrow(
+      `Windows runtime contains a filesystem link: ${runtimeDirectory}`,
+    )
+  })
+
+  it('rejects an x86 PE hidden anywhere in the Windows runtime', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    const x86Binary = join(runtimeDirectory, 'node_modules/native/hidden.data')
+    await mkdir(dirname(x86Binary), { recursive: true })
+    await writeFile(x86Binary, peFixture(0x014c))
+    const stageModule = await loadStageRuntime()
+
+    expect(stageModule.auditX64Pe).toBeTypeOf('function')
+    await expect(stageModule.auditX64Pe(runtimeDirectory)).rejects.toThrow(
+      `Windows x64 artifact contains a non-x64 PE file: ${x86Binary} (0x014c)`,
+    )
+  })
+
+  it('returns every x64 PE while ignoring ordinary files', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    const x64Executable = join(runtimeDirectory, 'DeepSeek Harness.exe')
+    const x64Addon = join(runtimeDirectory, 'node_modules/native/pty.node')
+    await mkdir(dirname(x64Addon), { recursive: true })
+    await writeFile(x64Executable, peFixture(0x8664))
+    await writeFile(x64Addon, peFixture(0x8664))
+    await writeFile(join(runtimeDirectory, 'package.json'), '{}')
+    const stageModule = await loadStageRuntime()
+
+    expect(stageModule.auditX64Pe).toBeTypeOf('function')
+    await expect(stageModule.auditX64Pe(runtimeDirectory)).resolves.toEqual([x64Executable, x64Addon])
   })
 
   it('removes only the deterministic runtime directory and executes the exact deploy and rebuild plans', async () => {

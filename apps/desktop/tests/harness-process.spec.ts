@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it } from 'vitest'
+import * as harnessProcessModule from '../src/harness-process.ts'
 import { DesktopLogger } from '../src/desktop-logger.ts'
 import { HarnessProcessController, type HarnessProcessOptions, type HarnessProcessSpawner } from '../src/harness-process.ts'
 
@@ -52,6 +53,7 @@ async function createController(
 
   return {
     controller: new HarnessProcessController({
+      target: { platform: 'darwin', arch: 'arm64' },
       executable: process.execPath,
       cliPath: fixturePath,
       cwd: process.cwd(),
@@ -73,6 +75,37 @@ async function createController(
 }
 
 describe('HarnessProcessController', () => {
+  it('accepts only the shipped macOS and Windows desktop targets', () => {
+    const resolveTarget = Reflect.get(harnessProcessModule, 'resolveDesktopTarget') as
+      | ((platform: string, arch: string) => { platform: string; arch: string })
+      | undefined
+
+    expect(resolveTarget).toBeTypeOf('function')
+    expect(resolveTarget?.('darwin', 'arm64')).toEqual({ platform: 'darwin', arch: 'arm64' })
+    expect(resolveTarget?.('win32', 'x64')).toEqual({ platform: 'win32', arch: 'x64' })
+    expect(() => resolveTarget?.('darwin', 'x64')).toThrow('darwin-x64')
+    expect(() => resolveTarget?.('linux', 'x64')).toThrow('linux-x64')
+  })
+
+  it('invokes taskkill shell-free for exactly the owned Windows process tree', async () => {
+    const terminate = Reflect.get(harnessProcessModule, 'terminateWindowsProcessTree') as
+      | ((pid: number, run: (...args: unknown[]) => Promise<{ exitCode: number; stderr: string }>) => Promise<void>)
+      | undefined
+    const calls: unknown[][] = []
+
+    expect(terminate).toBeTypeOf('function')
+    await terminate?.(4242, async (...args) => {
+      calls.push(args)
+      return { exitCode: 0, stderr: '' }
+    })
+
+    expect(calls).toEqual([[
+      'taskkill.exe',
+      ['/PID', '4242', '/T', '/F'],
+      { shell: false, windowsHide: true },
+    ]])
+  })
+
   it('adds exposed internals only to an Electron Node-mode backend child', async () => {
     const require = createRequire(import.meta.url)
     const electronExecutable = require('electron') as string
@@ -227,6 +260,64 @@ describe('HarnessProcessController', () => {
     await controller.stop()
 
     expect(kills).toEqual([[-pid!, 'SIGTERM'], [-pid!, 'SIGKILL']])
+  })
+
+  it('owns a Windows backend without a detached console and terminates its process tree', async () => {
+    const terminated: number[] = []
+    const { controller, children, spawns } = await createController(['normal'], {
+      target: { platform: 'win32', arch: 'x64' },
+      terminateWindowsProcessTree: async (pid) => {
+        terminated.push(pid)
+        process.kill(pid, 'SIGKILL')
+      },
+    })
+
+    await controller.start()
+    await controller.stop()
+
+    expect(spawns[0]?.options).toMatchObject({
+      detached: false,
+      windowsHide: true,
+      shell: false,
+    })
+    expect(terminated).toEqual([children[0]?.pid])
+  })
+
+  it('retains Windows process-tree ownership after taskkill fails', async () => {
+    let rejectTermination = true
+    const { controller } = await createController(['normal'], {
+      target: { platform: 'win32', arch: 'x64' },
+      terminateWindowsProcessTree: async (pid) => {
+        if (rejectTermination) throw new Error('taskkill failed with access denied')
+        process.kill(pid, 'SIGKILL')
+      },
+    })
+
+    await controller.start()
+    await expect(controller.stop()).rejects.toThrow('taskkill failed with access denied')
+    await expect(controller.start()).rejects.toThrow('already starting or ready')
+
+    rejectTermination = false
+    await expect(controller.stop()).resolves.toBeUndefined()
+  })
+
+  it('reports Windows cleanup failure even when the root exits during taskkill', async () => {
+    const { controller, children } = await createController(['normal'], {
+      target: { platform: 'win32', arch: 'x64' },
+      terminateWindowsProcessTree: async (pid) => {
+        process.kill(pid, 'SIGKILL')
+        await new Promise(resolve => setTimeout(resolve, 5))
+        throw new Error('taskkill failed with access denied')
+      },
+    })
+
+    await controller.start()
+    const childExit = new Promise<void>((resolveExit) => {
+      children[0]?.once('exit', () => { resolveExit() })
+    })
+    await expect(controller.stop()).rejects.toThrow('taskkill failed with access denied')
+    await childExit
+    await expect(controller.stop()).resolves.toBeUndefined()
   })
 
   it('reaps an ignoring descendant after its leader exits on SIGTERM before allowing retry', async () => {

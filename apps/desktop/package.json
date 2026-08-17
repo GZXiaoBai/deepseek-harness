@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-desktop",
   "version": "0.1.0-rc.5",
-  "description": "Apple Silicon macOS desktop wrapper for DeepSeek Harness",
+  "description": "Native macOS and Windows desktop wrapper for DeepSeek Harness",
   "publishConfig": {
     "access": "public"
   },
