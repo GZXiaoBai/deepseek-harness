@@ -27,6 +27,18 @@ export interface HarnessProcessOptions {
   logger: DesktopLogSink
 }
 
+/**
+ * Builds the fixed Harness Web argv, exposing Node internals only for Electron's Node mode.
+ *
+ * @param cliPath Harness CLI entry path.
+ * @param environment Backend child environment.
+ * @returns Backend-only process arguments.
+ */
+export function buildHarnessBackendArgs(cliPath: string, environment: NodeJS.ProcessEnv): string[] {
+  const args = [cliPath, 'web', '--host', '127.0.0.1', '--port', '0']
+  return environment.ELECTRON_RUN_AS_NODE === '1' ? ['--expose-internals', ...args] : args
+}
+
 type HarnessProcessState = 'idle' | 'starting' | 'ready' | 'stopping'
 
 interface RunningHarness {
@@ -84,7 +96,7 @@ export class HarnessProcessController {
       return Promise.reject(new Error('Harness process is already starting or ready'))
     }
 
-    const args = [this.#options.cliPath, 'web', '--host', '127.0.0.1', '--port', '0']
+    const args = buildHarnessBackendArgs(this.#options.cliPath, this.#options.env)
     let child: ChildProcess
     try {
       child = this.#spawnProcess(this.#options.executable, args, {

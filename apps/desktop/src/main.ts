@@ -1,4 +1,5 @@
-import { dirname, join } from 'node:path'
+import { realpath, stat } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
 import { DesktopLogger } from './desktop-logger.ts'
@@ -99,6 +100,69 @@ export interface ApplicationControllerOptions {
 }
 
 export type { ApplicationMenu, ApplicationMenuItem }
+
+/** Inputs that locate the Harness CLI for an Electron launch. */
+export interface DesktopCliEntryOptions {
+  isPackaged: boolean
+  resourcesPath: string
+  moduleUrl: string
+}
+
+/** Harness CLI path and working directory used by the backend child. */
+export interface DesktopCliEntry {
+  cliPath: string
+  cwd: string
+}
+
+/**
+ * Resolves an existing Harness CLI without allowing a packaged dependency link to escape its runtime.
+ *
+ * @param options Electron packaging state and application paths.
+ * @returns Existing CLI entry and the runtime or checkout working directory.
+ */
+export async function resolveDesktopCliEntry(options: DesktopCliEntryOptions): Promise<DesktopCliEntry> {
+  if (!options.isPackaged) {
+    const cliPath = fileURLToPath(new URL('../../cli/lib/bin.js', options.moduleUrl))
+    await requireRegularFile(cliPath, 'Unpackaged Harness CLI entry is missing')
+    return {
+      cliPath,
+      cwd: resolve(fileURLToPath(new URL('../../..', options.moduleUrl))),
+    }
+  }
+
+  const runtimeDirectory = resolve(options.resourcesPath, 'runtime')
+  const cliPath = join(runtimeDirectory, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
+  let canonicalRuntime: string
+  let canonicalCli: string
+  try {
+    const canonicalPaths = await Promise.all([
+      realpath(runtimeDirectory),
+      realpath(cliPath),
+    ])
+    canonicalRuntime = canonicalPaths[0]
+    canonicalCli = canonicalPaths[1]
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Packaged Harness CLI entry is missing: ${cliPath}`)
+    }
+    throw error
+  }
+  const fromRuntime = relative(canonicalRuntime, canonicalCli)
+  if (fromRuntime === '..' || fromRuntime.startsWith(`..${sep}`) || isAbsolute(fromRuntime)) {
+    throw new Error(`Packaged Harness CLI entry resolves outside the staged runtime: ${canonicalCli}`)
+  }
+  await requireRegularFile(canonicalCli, `Packaged Harness CLI entry is missing: ${cliPath}`)
+  return { cliPath, cwd: runtimeDirectory }
+}
+
+async function requireRegularFile(path: string, message: string): Promise<void> {
+  try {
+    if ((await stat(path)).isFile()) return
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  throw new Error(message)
+}
 
 /**
  * Installs one policy callback for direct top-level navigations and server redirects.
@@ -559,12 +623,11 @@ async function runElectronMain(): Promise<void> {
   await launchDesktopApplication(adapter, async () => {
     const userDataPath = electron.app.getPath('userData')
     const logger = new DesktopLogger(userDataPath)
-    const cliPath = electron.app.isPackaged
-      ? join(process.resourcesPath, 'runtime', 'lib', 'bin.js')
-      : fileURLToPath(new URL('../../cli/lib/bin.js', import.meta.url))
-    const cwd = electron.app.isPackaged
-      ? dirname(dirname(cliPath))
-      : fileURLToPath(new URL('../../..', import.meta.url))
+    const { cliPath, cwd } = await resolveDesktopCliEntry({
+      isPackaged: electron.app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      moduleUrl: import.meta.url,
+    })
     const environment = await buildChildEnvironment(process.env)
     const harness = new HarnessProcessController({
       executable: process.execPath,

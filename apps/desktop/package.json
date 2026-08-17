@@ -18,8 +18,9 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsdown --config tsdown.config.ts",
-    "test": "vitest run tests",
+    "build": "pnpm run verify:runtime-closure && tsc -p tsconfig.json && tsdown --config tsdown.config.ts",
+    "test": "pnpm --dir ../.. exec vitest run apps/desktop/tests",
+    "verify:runtime-closure": "tsx ../../scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json",
     "stage": "node scripts/stage-runtime.mjs",
     "package": "node scripts/package.mjs"
   },
