@@ -12,6 +12,7 @@ const fixturePath = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta
 const userDataDirectories: string[] = []
 const processGroups: number[] = []
 const posixIt = process.platform === 'win32' ? it.skip : it
+const nativeShutdownTimeoutMs = process.platform === 'win32' ? 250 : 25
 
 afterEach(async () => {
   for (const pid of processGroups.splice(0)) {
@@ -62,7 +63,7 @@ async function createController(
       dshHome: join(userData, 'harness'),
       env: process.env,
       logger: new DesktopLogger(userData),
-      shutdownTimeoutMs: 25,
+      shutdownTimeoutMs: nativeShutdownTimeoutMs,
       spawnProcess,
       killProcessGroup: (pid, signal) => {
         kills.push([pid, signal])
