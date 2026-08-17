@@ -247,6 +247,7 @@ describe('desktop runtime staging', () => {
     const commands: StageCommand[] = []
 
     await executeStagePlan(plan, {
+      auditRuntime: async () => {},
       runCommand: async (command) => {
         commands.push(command)
         if (command.args.includes('deploy')) await createRuntimeClosure(runtimeDirectory)
@@ -436,6 +437,7 @@ describe('desktop runtime staging', () => {
     const commands: StageCommand[] = []
 
     await executeStagePlan(plan, {
+      auditRuntime: async () => {},
       runCommand: async (command) => {
         commands.push(command)
         if (command.args.includes('deploy')) await createRuntimeClosure(runtimeDirectory)

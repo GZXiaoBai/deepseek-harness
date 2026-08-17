@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as harnessProcessModule from '../src/harness-process.ts'
 import { DesktopLogger } from '../src/desktop-logger.ts'
@@ -113,16 +112,14 @@ describe('HarnessProcessController', () => {
   })
 
   it('adds exposed internals only to an Electron Node-mode backend child', async () => {
-    const require = createRequire(import.meta.url)
-    const electronExecutable = require('electron') as string
     const electron = await createController(['internals-ready'], {
-      executable: electronExecutable,
+      executable: process.execPath,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     })
 
     await expect(electron.controller.start()).resolves.toMatchObject({ hostname: '127.0.0.1' })
     expect(electron.spawns[0]).toMatchObject({
-      executable: electronExecutable,
+      executable: process.execPath,
       args: [
         '--expose-internals',
         fixturePath,
