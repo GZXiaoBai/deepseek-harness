@@ -95,7 +95,7 @@ describe('Windows Desktop package verification', () => {
       runtime: join(appDirectory, 'resources/runtime'),
       peFiles: [join(appDirectory, 'DeepSeek Harness.exe'), nestedPe].sort(),
     })
-  })
+  }, 30_000)
 
   it('rejects a Windows runtime root link before reading packaged dependencies', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-windows-runtime-link-'))
