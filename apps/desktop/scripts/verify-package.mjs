@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -129,14 +129,7 @@ async function verifyPackage() {
 
 /** @param {string} appPath */
 async function verifyAppBundle(appPath) {
-  await requireDirectory(appPath, 'Packaged App bundle is missing')
-  const executable = join(appPath, 'Contents/MacOS', PRODUCT_NAME)
-  const resources = join(appPath, 'Contents/Resources')
-  const runtime = join(resources, 'runtime')
-  const infoPlist = join(appPath, 'Contents/Info.plist')
-  await requireExecutable(executable)
-  await requireFile(join(resources, 'app.asar'), 'Packaged Electron app.asar is missing')
-  await requireDirectory(runtime, 'Packaged Harness runtime is missing')
+  const { executable, runtime, infoPlist } = await validateAppBundleLayout(appPath)
   await resolveCliEntryPath(runtime)
   await resolveWebFrontendIndex(runtime)
   await assertRuntimeSymlinksContained(runtime)
@@ -146,22 +139,119 @@ async function verifyAppBundle(appPath) {
   if (plist.CFBundleExecutable !== PRODUCT_NAME) throw new Error(`Unexpected bundle executable: ${String(plist.CFBundleExecutable)}`)
   if (plist.LSMinimumSystemVersion !== '14.0') throw new Error(`Unexpected minimum macOS version: ${String(plist.LSMinimumSystemVersion)}`)
 
-  await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath])
-  const signature = await run('/usr/bin/codesign', ['-dvvv', '--entitlements', ':-', appPath])
-  const signatureText = `${signature.stdout}\n${signature.stderr}`
-  if (!/Signature=adhoc/.test(signatureText) || !/flags=.*\bruntime\b/.test(signatureText)) {
-    throw new Error('App signature is not ad-hoc signed with Hardened Runtime')
-  }
-  const actualEntitlements = [...signatureText.matchAll(/<key>([^<]+)<\/key>\s*<true\/>/g)].map(match => match[1])
-  if (JSON.stringify(actualEntitlements) !== JSON.stringify(EXPECTED_ENTITLEMENTS)) {
-    throw new Error(`Unexpected App entitlements: ${JSON.stringify(actualEntitlements)}`)
-  }
-
   const machOFiles = await auditArm64MachO(appPath)
   if (machOFiles.length === 0) throw new Error('Packaged App contains no Mach-O binaries')
+  await verifyAppCodeSignatures(appPath, machOFiles)
 
   const gatekeeper = await run('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath], { allowFailure: true })
   if (gatekeeper.code !== 0) console.log('Gatekeeper rejected the expected ad-hoc, non-notarized personal build.')
+}
+
+/**
+ * Validates ordinary bundle entry types and canonical containment before reading or executing them.
+ *
+ * @param {string} appPath App bundle root.
+ * @returns {Promise<{ executable: string, resources: string, runtime: string, appAsar: string, infoPlist: string }>} Validated critical paths.
+ */
+export async function validateAppBundleLayout(appPath) {
+  await requireOrdinaryDirectory(appPath, 'Packaged App bundle must be an ordinary directory')
+  const contents = join(appPath, 'Contents')
+  const resources = join(contents, 'Resources')
+  const runtime = join(resources, 'runtime')
+  const executable = join(contents, 'MacOS', PRODUCT_NAME)
+  const appAsar = join(resources, 'app.asar')
+  const infoPlist = join(contents, 'Info.plist')
+  await requireOrdinaryDirectory(contents, 'Packaged App Contents must be an ordinary directory')
+  await requireOrdinaryDirectory(resources, 'Packaged App Resources must be an ordinary directory')
+  await requireOrdinaryDirectory(runtime, 'Packaged Harness runtime must be an ordinary directory')
+  await requireOrdinaryFile(executable, 'Packaged App executable must be an ordinary file')
+  await requireExecutable(executable)
+  await requireOrdinaryFile(appAsar, 'Packaged Electron app.asar must be an ordinary file')
+  await requireOrdinaryFile(infoPlist, 'Packaged App Info.plist must be an ordinary file')
+
+  const canonicalApp = await realpath(appPath)
+  const canonicalResources = await requireCanonicalDescendant(canonicalApp, resources, 'Packaged App Resources')
+  await requireCanonicalDescendant(canonicalResources, runtime, 'Packaged Harness runtime')
+  await requireCanonicalDescendant(canonicalResources, appAsar, 'Packaged Electron app.asar')
+  await requireCanonicalDescendant(canonicalApp, executable, 'Packaged App executable')
+  await requireCanonicalDescendant(canonicalApp, infoPlist, 'Packaged App Info.plist')
+  return { executable, resources, runtime, appAsar, infoPlist }
+}
+
+/**
+ * Verifies the outer App and each unique canonical Mach-O signature independently.
+ *
+ * @param {string} appPath App bundle root.
+ * @param {readonly string[]} machOFiles Mach-O paths returned by the architecture audit.
+ * @param {{ runCommand?: typeof run }} [options] Command seam for behavior tests.
+ * @returns {Promise<readonly string[]>} Sorted unique canonical Mach-O paths.
+ */
+export async function verifyAppCodeSignatures(appPath, machOFiles, options = {}) {
+  const runCommand = options.runCommand ?? run
+  await runCommand('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath])
+  const appSignature = await inspectCodeSignature(appPath, runCommand)
+  requireAdHocHardenedSignature(appSignature.text, 'App')
+  const appEntitlements = await parseEntitlements(appSignature.text, runCommand)
+  const expectedAppEntitlements = Object.fromEntries(EXPECTED_ENTITLEMENTS.map(key => [key, true]))
+  if (!sameJsonObject(appEntitlements, expectedAppEntitlements)) {
+    throw new Error(`Unexpected App entitlements: ${JSON.stringify(appEntitlements)}`)
+  }
+
+  const canonicalApp = await realpath(appPath)
+  const uniqueMachOFiles = [...new Set(await Promise.all(machOFiles.map(async path => {
+    return await requireCanonicalDescendant(canonicalApp, path, 'Packaged Mach-O')
+  })))].sort()
+  for (const path of uniqueMachOFiles) {
+    await runCommand('/usr/bin/codesign', ['--verify', '--strict', path])
+    const nestedSignature = await inspectCodeSignature(path, runCommand)
+    requireAdHocHardenedSignature(nestedSignature.text, `Nested Mach-O ${path}`)
+    const entitlements = await parseEntitlements(nestedSignature.text, runCommand)
+    const unexpected = Object.entries(entitlements).some(([key, value]) => {
+      return !EXPECTED_ENTITLEMENTS.includes(key) || value !== true
+    })
+    if (unexpected) throw new Error(`Unexpected nested Mach-O entitlements for ${path}: ${JSON.stringify(entitlements)}`)
+  }
+  return uniqueMachOFiles
+}
+
+/** @param {string} path @param {typeof run} runCommand */
+async function inspectCodeSignature(path, runCommand) {
+  const signature = await runCommand('/usr/bin/codesign', ['-dvvv', '--entitlements', ':-', path])
+  return { text: `${signature.stdout}\n${signature.stderr}` }
+}
+
+/** @param {string} signatureText @param {string} label */
+function requireAdHocHardenedSignature(signatureText, label) {
+  if (!/Signature=adhoc/.test(signatureText) || !/flags=.*\bruntime\b/.test(signatureText)) {
+    throw new Error(`${label} is not ad-hoc signed with Hardened Runtime`)
+  }
+}
+
+/** @param {string} signatureText @param {typeof run} runCommand */
+async function parseEntitlements(signatureText, runCommand) {
+  const start = signatureText.indexOf('<?xml')
+  const fallbackStart = signatureText.indexOf('<plist')
+  const plistStart = start === -1 ? fallbackStart : start
+  if (plistStart === -1) return {}
+  const end = signatureText.indexOf('</plist>', plistStart)
+  if (end === -1) throw new Error('Code signature emitted an incomplete entitlements plist')
+  const xml = signatureText.slice(plistStart, end + '</plist>'.length)
+  const parsed = JSON.parse((await runCommand(
+    '/usr/bin/plutil',
+    ['-convert', 'json', '-o', '-', '--', '-'],
+    { input: xml },
+  )).stdout)
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Code signature entitlements must be a dictionary')
+  }
+  return parsed
+}
+
+/** @param {Record<string, unknown>} left @param {Record<string, unknown>} right */
+function sameJsonObject(left, right) {
+  const leftEntries = Object.entries(left).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+  const rightEntries = Object.entries(right).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+  return JSON.stringify(leftEntries) === JSON.stringify(rightEntries)
 }
 
 /** @param {string} appPath */
@@ -177,7 +267,7 @@ async function verifyStandaloneLaunch(appPath) {
   try {
     await mkdir(userData)
     await mkdir(isolatedHome)
-    await cp(appPath, copiedApp, { recursive: true, verbatimSymlinks: true })
+    await copyAndVerifyStandaloneApp(appPath, copiedApp)
     const executable = join(copiedApp, 'Contents/MacOS', PRODUCT_NAME)
     const environment = isolatedEnvironment(isolatedHome)
     primary = launchApp(executable, userData, temporaryRoot, environment)
@@ -213,6 +303,22 @@ async function verifyStandaloneLaunch(appPath) {
     if (readyUrl !== undefined) await requireClosedTcpPort(readyUrl, { timeoutMs: 5_000 })
     await rm(temporaryRoot, { recursive: true })
   }
+}
+
+/**
+ * Copies and fully revalidates the standalone App before its executable is launched.
+ *
+ * @param {string} sourceApp Verified build output App.
+ * @param {string} copiedApp Outside-repository App destination.
+ * @param {{ copyApp?: (source: string, destination: string) => Promise<void> }} [options] Copy seam for behavior tests.
+ * @returns {Promise<void>} Resolves after the copied bundle passes full validation.
+ */
+export async function copyAndVerifyStandaloneApp(sourceApp, copiedApp, options = {}) {
+  const copyApp = options.copyApp ?? (async (source, destination) => {
+    await cp(source, destination, { recursive: true, verbatimSymlinks: true })
+  })
+  await copyApp(sourceApp, copiedApp)
+  await verifyAppBundle(copiedApp)
 }
 
 /** @param {{ userData: string, harnessData: string, logPath: string, singletonSocket: string }} paths */
@@ -389,7 +495,7 @@ async function emergencyCleanup(primary, backendPid) {
 /** @param {string} path @param {string} message */
 async function requireFile(path, message) {
   try {
-    if ((await stat(path)).isFile()) return
+    if ((await lstat(path)).isFile()) return
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
   }
@@ -399,7 +505,7 @@ async function requireFile(path, message) {
 /** @param {string} path @param {string} message */
 async function requireDirectory(path, message) {
   try {
-    if ((await stat(path)).isDirectory()) return
+    if ((await lstat(path)).isDirectory()) return
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
   }
@@ -409,20 +515,40 @@ async function requireDirectory(path, message) {
 /** @param {string} path */
 async function requireExecutable(path) {
   await requireFile(path, 'Packaged App executable is missing')
-  const entry = await stat(path)
+  const entry = await lstat(path)
   if ((entry.mode & 0o111) === 0) throw new Error(`Packaged App executable is not executable: ${path}`)
 }
 
-/** @param {string} executable @param {readonly string[]} args @param {{ allowFailure?: boolean }} [options] */
+/** @param {string} path @param {string} message */
+async function requireOrdinaryFile(path, message) {
+  await requireFile(path, message)
+}
+
+/** @param {string} path @param {string} message */
+async function requireOrdinaryDirectory(path, message) {
+  await requireDirectory(path, message)
+}
+
+/** @param {string} canonicalParent @param {string} candidate @param {string} label */
+async function requireCanonicalDescendant(canonicalParent, candidate, label) {
+  const canonicalCandidate = await realpath(candidate)
+  if (!contains(canonicalParent, canonicalCandidate) || canonicalCandidate === canonicalParent) {
+    throw new Error(`${label} resolves outside its packaged parent: ${candidate} -> ${canonicalCandidate}`)
+  }
+  return canonicalCandidate
+}
+
+/** @param {string} executable @param {readonly string[]} args @param {{ allowFailure?: boolean, input?: string }} [options] */
 async function run(executable, args, options = {}) {
   return await new Promise((resolveRun, rejectRun) => {
-    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(executable, args, { stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', chunk => { stdout += chunk })
     child.stderr.on('data', chunk => { stderr += chunk })
+    if (options.input !== undefined) child.stdin.end(options.input)
     child.once('error', rejectRun)
     child.once('exit', (code, signal) => {
       const result = { code, signal, stdout, stderr }

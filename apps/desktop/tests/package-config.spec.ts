@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -49,6 +49,18 @@ interface VerifyPackageModule {
     logPath: string
     singletonSocket: string
   }
+  validateAppBundleLayout(appPath: string): Promise<unknown>
+  verifyAppCodeSignatures(appPath: string, machOFiles: readonly string[], options: {
+    runCommand(executable: string, args: readonly string[], options?: { input?: string }): Promise<{
+      code: number
+      signal: null
+      stdout: string
+      stderr: string
+    }>
+  }): Promise<readonly string[]>
+  copyAndVerifyStandaloneApp(sourceApp: string, copiedApp: string, options?: {
+    copyApp(source: string, destination: string): Promise<void>
+  }): Promise<void>
 }
 
 interface AfterPackPlan {
@@ -271,6 +283,112 @@ describe('desktop package configuration', () => {
     expect(relative(paths.harnessData, paths.logPath)).toMatch(/^\.\./)
   })
 
+  it('rejects a symlink App root even when it targets the release App', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-package-app-link-'))
+    directories.push(root)
+    const releaseApp = join(root, 'release/mac-arm64/DeepSeek Harness.app')
+    const linkedApp = join(root, 'standalone/DeepSeek Harness.app')
+    await createMinimalAppBundle(releaseApp)
+    await mkdir(join(root, 'standalone'))
+    await symlink(releaseApp, linkedApp)
+    const verifyModule = await loadVerifyPackageModule()
+
+    await expect(verifyModule.validateAppBundleLayout(linkedApp)).rejects.toThrow(
+      `Packaged App bundle must be an ordinary directory: ${linkedApp}`,
+    )
+  })
+
+  it('rejects a runtime root symlink to the checkout runtime', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-package-runtime-link-'))
+    directories.push(root)
+    const appPath = join(root, 'release/mac-arm64/DeepSeek Harness.app')
+    const checkoutRuntime = join(root, 'checkout/apps/desktop/.runtime')
+    await createMinimalAppBundle(appPath, { omitRuntime: true })
+    await mkdir(checkoutRuntime, { recursive: true })
+    await symlink(checkoutRuntime, join(appPath, 'Contents/Resources/runtime'))
+    const verifyModule = await loadVerifyPackageModule()
+
+    await expect(verifyModule.validateAppBundleLayout(appPath)).rejects.toThrow(
+      `Packaged Harness runtime must be an ordinary directory: ${join(appPath, 'Contents/Resources/runtime')}`,
+    )
+  })
+
+  it('revalidates the copied standalone App before launch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-package-copied-link-'))
+    directories.push(root)
+    const sourceApp = join(root, 'release/mac-arm64/DeepSeek Harness.app')
+    const copiedApp = join(root, 'outside/DeepSeek Harness.app')
+    const checkoutRuntime = join(root, 'checkout/apps/desktop/.runtime')
+    await createMinimalAppBundle(sourceApp)
+    await mkdir(checkoutRuntime, { recursive: true })
+    const verifyModule = await loadVerifyPackageModule()
+
+    await expect(verifyModule.copyAndVerifyStandaloneApp(sourceApp, copiedApp, {
+      copyApp: async (source, destination) => {
+        await cp(source, destination, { recursive: true, verbatimSymlinks: true })
+        await rm(join(destination, 'Contents/Resources/runtime'), { recursive: true })
+        await symlink(checkoutRuntime, join(destination, 'Contents/Resources/runtime'))
+      },
+    })).rejects.toThrow(
+      `Packaged Harness runtime must be an ordinary directory: ${join(copiedApp, 'Contents/Resources/runtime')}`,
+    )
+  })
+
+  it('rejects an unsigned nested Mach-O even when the outer App signature verifies', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-package-unsigned-nested-'))
+    directories.push(root)
+    const appPath = join(root, 'DeepSeek Harness.app')
+    const nestedBinary = join(appPath, 'Contents/Resources/runtime/addon.node')
+    await mkdir(join(appPath, 'Contents/Resources/runtime'), { recursive: true })
+    await writeFile(nestedBinary, 'fixture')
+    const actualNestedBinary = await realpath(nestedBinary)
+    const commands: string[] = []
+    const verifyModule = await loadVerifyPackageModule()
+
+    await expect(verifyModule.verifyAppCodeSignatures(appPath, [nestedBinary], {
+      runCommand: async (executable, args) => {
+        commands.push(`${executable} ${args.join(' ')}`)
+        if (args.includes('--verify') && args.at(-1) === actualNestedBinary) throw new Error('nested code object is not signed at all')
+        if (executable === '/usr/bin/plutil') {
+          return commandResult(JSON.stringify(Object.fromEntries(APPROVED_ENTITLEMENTS.map(key => [key, true]))))
+        }
+        return commandResult(args.includes('-dvvv') ? approvedSignatureDetails() : '')
+      },
+    })).rejects.toThrow('nested code object is not signed at all')
+    expect(commands[0]).toBe(`/usr/bin/codesign --verify --deep --strict ${appPath}`)
+    expect(commands).toContain(`/usr/bin/codesign --verify --strict ${actualNestedBinary}`)
+  })
+
+  it('rejects unexpected nested Mach-O entitlements', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-package-nested-entitlement-'))
+    directories.push(root)
+    const appPath = join(root, 'DeepSeek Harness.app')
+    const nestedBinary = join(appPath, 'Contents/Resources/runtime/addon.node')
+    await mkdir(join(appPath, 'Contents/Resources/runtime'), { recursive: true })
+    await writeFile(nestedBinary, 'fixture')
+    const actualNestedBinary = await realpath(nestedBinary)
+    const verifyModule = await loadVerifyPackageModule()
+
+    await expect(verifyModule.verifyAppCodeSignatures(appPath, [nestedBinary], {
+      runCommand: async (executable, args, options) => {
+        if (executable === '/usr/bin/plutil') {
+          const unexpected = options?.input?.includes('com.apple.security.get-task-allow') === true
+          return commandResult(JSON.stringify(unexpected
+            ? { 'com.apple.security.get-task-allow': true }
+            : Object.fromEntries(APPROVED_ENTITLEMENTS.map(key => [key, true]))))
+        }
+        if (args.includes('-dvvv')) {
+          return commandResult(approvedSignatureDetails(
+            args.at(-1) === actualNestedBinary ? ['com.apple.security.get-task-allow'] : APPROVED_ENTITLEMENTS,
+          ))
+        }
+        return commandResult('')
+      },
+    })).rejects.toThrow(
+      `Unexpected nested Mach-O entitlements for ${actualNestedBinary}: {"com.apple.security.get-task-allow":true}`,
+    )
+  })
+
   it.each([
     ['linux', 3],
     ['darwin', 1],
@@ -434,4 +552,40 @@ async function createHookRuntime(runtimeDirectory: string): Promise<string> {
   await symlink('../../../web-app/node_modules/@deepseek-ai/dsh-web-app', join(dirname(dsh), 'dsh-web-app'))
   await symlink('../../../frontend/node_modules/@deepseek-ai/dsh-web-frontend', join(dirname(webApp), 'dsh-web-frontend'))
   return dshLink
+}
+
+const APPROVED_ENTITLEMENTS = [
+  'com.apple.security.cs.allow-jit',
+  'com.apple.security.cs.allow-unsigned-executable-memory',
+  'com.apple.security.cs.disable-library-validation',
+] as const
+
+function approvedSignatureDetails(entitlements: readonly string[] = APPROVED_ENTITLEMENTS): string {
+  const entries = entitlements.map(key => `<key>${key}</key><true/>`).join('')
+  return [
+    'Signature=adhoc',
+    'CodeDirectory v=20500 size=123 flags=0x10000(runtime) hashes=1+2 location=embedded',
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>${entries}</dict></plist>`,
+  ].join('\n')
+}
+
+function commandResult(stdout: string): {
+  code: number
+  signal: null
+  stdout: string
+  stderr: string
+} {
+  return { code: 0, signal: null, stdout, stderr: '' }
+}
+
+async function createMinimalAppBundle(appPath: string, options: { omitRuntime?: boolean } = {}): Promise<void> {
+  const executable = join(appPath, 'Contents/MacOS/DeepSeek Harness')
+  const resources = join(appPath, 'Contents/Resources')
+  await mkdir(join(appPath, 'Contents/MacOS'), { recursive: true })
+  await mkdir(resources, { recursive: true })
+  if (options.omitRuntime !== true) await mkdir(join(resources, 'runtime'))
+  await writeFile(executable, 'executable')
+  await chmod(executable, 0o755)
+  await writeFile(join(resources, 'app.asar'), 'asar')
+  await writeFile(join(appPath, 'Contents/Info.plist'), 'plist')
 }
