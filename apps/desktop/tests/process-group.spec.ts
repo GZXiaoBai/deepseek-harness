@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url'
+import { createServer } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
 
 interface ProcessGroupModule {
@@ -10,6 +11,11 @@ interface ProcessGroupModule {
     signalProcess?: (pid: number, signal: NodeJS.Signals | 0) => void
     shutdownTimeoutMs?: number
   }) => Promise<void>
+  requireClosedTcpPort: (url: URL, options?: {
+    timeoutMs?: number
+    retryMs?: number
+    connectTimeoutMs?: number
+  }) => Promise<void>
 }
 
 const moduleUrl = pathToFileURL(`${import.meta.dirname}/../scripts/process-group.mjs`).href
@@ -19,6 +25,32 @@ async function loadProcessGroup(): Promise<ProcessGroupModule> {
 }
 
 describe('owned process-group cleanup', () => {
+  it('detects an open TCP server that never returns an HTTP response', async () => {
+    const server = createServer(() => {})
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once('error', rejectListen)
+      server.listen(0, '127.0.0.1', resolveListen)
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('Expected a TCP address')
+    const { requireClosedTcpPort } = await loadProcessGroup()
+
+    try {
+      await expect(requireClosedTcpPort(new URL(`http://127.0.0.1:${String(address.port)}`), {
+        timeoutMs: 30,
+        retryMs: 5,
+        connectTimeoutMs: 10,
+      })).rejects.toThrow('remains open')
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => {
+          if (error === undefined) resolveClose()
+          else rejectClose(error)
+        })
+      })
+    }
+  })
+
   it('does not signal an already-exited leader or mask the primary lifecycle result', async () => {
     const signalProcess = vi.fn(() => { throw new Error('must not signal') })
     const { terminateOwnedProcessGroup } = await loadProcessGroup()
@@ -62,5 +94,43 @@ describe('owned process-group cleanup', () => {
       leaderExited: () => false,
       signalProcess,
     })).rejects.toThrow('permission denied')
+  })
+
+  it('kills a surviving descendant after the signaled leader exits', async () => {
+    let leaderExited = false
+    let descendantAlive = true
+    const signals: Array<NodeJS.Signals | 0> = []
+    const signalProcess = vi.fn((pid: number, signal: NodeJS.Signals | 0) => {
+      if (pid > 0 && signal === 0) {
+        if (leaderExited) throw Object.assign(new Error('leader gone'), { code: 'ESRCH' })
+        return
+      }
+      if (pid !== -44) throw new Error(`unexpected pid ${String(pid)}`)
+      signals.push(signal)
+      if (signal === 'SIGTERM') {
+        leaderExited = true
+        return
+      }
+      if (signal === 'SIGKILL') {
+        descendantAlive = false
+        return
+      }
+      if (signal === 0 && !descendantAlive) {
+        throw Object.assign(new Error('group gone'), { code: 'ESRCH' })
+      }
+    })
+    const { terminateOwnedProcessGroup } = await loadProcessGroup()
+
+    await terminateOwnedProcessGroup({
+      processGroupId: 44,
+      leaderPid: 44,
+      exit: Promise.resolve({ code: 0, signal: null }),
+      leaderExited: () => leaderExited,
+      signalProcess,
+      shutdownTimeoutMs: 0,
+    })
+
+    expect(signals).toContain('SIGKILL')
+    expect(descendantAlive).toBe(false)
   })
 })

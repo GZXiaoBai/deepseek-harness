@@ -62,6 +62,7 @@ export function createStagePlan(input) {
       args: [
         '--config.inject-workspace-packages=true',
         '--ignore-scripts',
+        '--frozen-lockfile',
         '--filter',
         '@deepseek-ai/dsh-desktop-runtime',
         '--prod',
@@ -100,12 +101,14 @@ export async function executeStagePlan(plan, options = {}) {
   await runCommand(plan.verifyClosureCommand)
   await removeRuntimeDirectory(plan.runtimeDirectory)
   await runCommand(plan.deployCommand)
+  await assertRuntimeSymlinksContained(plan.runtimeDirectory)
   const repairScript = await findRepairScript(plan.runtimeDirectory)
   await runCommand({
     executable: process.execPath,
     args: [repairScript],
     cwd: plan.runtimeDirectory,
   })
+  await assertRuntimeSymlinksContained(plan.runtimeDirectory)
   await runCommand(plan.rebuildCommand)
   await resolveCliEntryPath(plan.runtimeDirectory)
   await resolveWebFrontendIndex(plan.runtimeDirectory)
@@ -175,10 +178,16 @@ function missingWebFrontend() {
 
 /** @param {string} runtimeDirectory */
 async function findRepairScript(runtimeDirectory) {
+  const canonicalRuntimeDirectory = await realpath(runtimeDirectory)
   const matches = []
   for await (const path of walk(runtimeDirectory)) {
     if (!path.endsWith(REPAIR_SCRIPT_SUFFIX)) continue
-    if ((await stat(path)).isFile()) matches.push(path)
+    const entry = await lstat(path)
+    const canonicalPath = await realpath(path)
+    if (entry.isSymbolicLink() || !entry.isFile() || !contains(canonicalRuntimeDirectory, canonicalPath)) {
+      throw new Error(`Staged subprocess permission repair must be a regular internal file: ${path}`)
+    }
+    matches.push(path)
   }
   if (matches.length !== 1) {
     throw new Error(`Expected one staged subprocess permission repair script, found ${String(matches.length)}`)

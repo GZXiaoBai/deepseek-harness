@@ -1,4 +1,7 @@
 import { spawnSync } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
@@ -23,5 +26,37 @@ describe('Desktop runtime dependency closure', () => {
     expect(result.stdout).toMatch(
       /@deepseek-ai\/dsh-desktop-runtime: [1-9][0-9]* workspace packages form a closed runtime dependency graph\./,
     )
+  })
+
+  it('rejects a deploy root that supplies only the public CLI', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-runtime-closure-negative-'))
+    const manifestPath = join(directory, 'package.json')
+    await writeFile(manifestPath, JSON.stringify({
+      name: '@deepseek-ai/dsh-runtime-closure-negative',
+      private: true,
+      dependencies: { '@deepseek-ai/dsh': 'workspace:^' },
+    }))
+
+    try {
+      const result = spawnSync(process.execPath, [
+        tsxCli,
+        'scripts/verify-runtime-closure.ts',
+        '--manifest',
+        manifestPath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      })
+      const output = `${result.stdout}${result.stderr}`
+
+      expect(result.error).toBeUndefined()
+      expect(result.status, output).not.toBe(0)
+      expect(output).toContain(
+        '@deepseek-ai/dsh-runtime-closure-negative -> @deepseek-ai/dsh -> '
+        + '@deepseek-ai/dsh-app-boot -> @deepseek-ai/cordis-plugin-group',
+      )
+    } finally {
+      await rm(directory, { recursive: true })
+    }
   })
 })

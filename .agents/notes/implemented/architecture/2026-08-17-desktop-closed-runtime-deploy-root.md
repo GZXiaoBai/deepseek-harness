@@ -16,11 +16,11 @@ The Web composition mounts Cordis HMR. Under Electron's embedded Node runtime, H
 
 `apps/desktop/runtime/package.json` is a private dependency-only workspace and the deploy root for the macOS Desktop application. It depends on `@deepseek-ai/dsh` and directly supplies every non-optional workspace peer reachable through the CLI and Web dependency graph. `scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json` traverses app, package, and vendor manifests and rejects any missing required peer; Desktop build and staging execute that check.
 
-Staging deploys `@deepseek-ai/dsh-desktop-runtime` with injected workspace packages and dependency lifecycle scripts disabled. It then executes only the staged `@deepseek-ai/dsh-subprocess-local` permission repair and runs Electron rebuild for the target Electron version and architecture. CLI and frontend paths resolve through package relationships rooted at the deployed runtime, and every staged symlink's real target must remain inside the runtime directory.
+Staging deploys `@deepseek-ai/dsh-desktop-runtime` from the frozen lockfile with injected workspace packages and dependency lifecycle scripts disabled. Before executing staged code, it audits every symlink target and requires the `@deepseek-ai/dsh-subprocess-local` permission repair to be a regular internal file rather than a symlink. It executes only that repair, runs Electron rebuild for the target Electron version and architecture, and repeats the containment audit after staged mutations. CLI and frontend paths resolve through package relationships rooted at the deployed runtime.
 
 The Desktop Harness backend child receives `--expose-internals` only when `ELECTRON_RUN_AS_NODE=1`. Plain Node launches do not receive it. The Electron main process argv and renderer preferences remain unchanged; the renderer keeps context isolation, sandboxing, and Node integration disabled.
 
-Owned backend shutdown signals only the detached negative process-group id. An already-observed child exit needs no signal. EPERM is treated as a non-owned or reused group only when the positive leader pid is gone; EPERM while the leader remains alive is a cleanup failure.
+Owned backend shutdown signals only the detached negative process-group id. Before any group signal succeeds, an already-observed leader exit needs no signal, and EPERM may establish that the group is no longer owned when the positive leader pid is gone. After a negative process-group signal succeeds, leader exit does not end ownership: shutdown keeps probing the negative group id and escalates until the operating system reports ESRCH. EPERM after ownership is established is a cleanup failure.
 
 ## Alternatives considered
 
@@ -35,4 +35,4 @@ Owned backend shutdown signals only the detached negative process-group id. An a
 - Desktop runtime peer ownership is explicit and mechanically closed without widening the public CLI manifest.
 - The deploy root duplicates required peer names by design; the closure verifier, rather than manual smoke-test iteration, owns freshness.
 - Staged native compatibility is accepted by real Electron loading and exercise. `electron-rebuild` may report no modules when compatible darwin-arm64 N-API prebuilds ship in the closure.
-- The runtime smoke verifies native loading, CLI version, the strict loopback URL, HTTP status and title, owned-group shutdown, port closure, and absence of checkout-resolving symlinks.
+- The runtime smoke verifies native loading, CLI version, the strict loopback URL, HTTP status and title, owned-group shutdown, TCP connection refusal on the closed port, and absence of checkout-resolving symlinks.

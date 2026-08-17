@@ -16,11 +16,11 @@ Web 组合会挂载 Cordis HMR。HMR 在 Electron 的内嵌 Node 运行时中需
 
 `apps/desktop/runtime/package.json` 是 macOS Desktop 应用的私有纯依赖工作区和部署根。它依赖 `@deepseek-ai/dsh`，并直接提供 CLI 与 Web 依赖图中可达的每个非可选工作区 peer。`scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json` 遍历应用、包和 vendor 清单，拒绝任何缺失的必需 peer；Desktop 构建与暂存都会执行该检查。
 
-暂存使用注入式工作区包部署 `@deepseek-ai/dsh-desktop-runtime`，并禁用依赖生命周期脚本。随后只执行已暂存的 `@deepseek-ai/dsh-subprocess-local` 权限修复，并针对目标 Electron 版本与架构运行 Electron rebuild。CLI 和前端路径通过以已部署运行时为根的包关系解析，每个已暂存符号链接的真实目标都必须留在运行时目录内。
+暂存使用冻结锁文件和注入式工作区包部署 `@deepseek-ai/dsh-desktop-runtime`，并禁用依赖生命周期脚本。在执行已暂存代码前，它会审计每个符号链接目标，并要求 `@deepseek-ai/dsh-subprocess-local` 权限修复是运行时内部的常规文件而不是符号链接。它只执行该修复，针对目标 Electron 版本与架构运行 Electron rebuild，并在已暂存内容发生变更后重复执行包含性审计。CLI 和前端路径通过以已部署运行时为根的包关系解析。
 
 只有在 `ELECTRON_RUN_AS_NODE=1` 时，Desktop Harness 后端子进程才会收到 `--expose-internals`。普通 Node 启动不会收到该参数。Electron 主进程参数和渲染器偏好保持不变；渲染器继续启用上下文隔离与沙箱，并禁用 Node 集成。
 
-后端关闭只向自己创建的分离式负进程组 id 发送信号。已经观察到子进程退出时无需发送信号。只有当正数 leader pid 已消失时，EPERM 才表示进程组已不归当前进程所有或 id 已复用；leader 仍存活时的 EPERM 是清理失败。
+后端关闭只向自己创建的分离式负进程组 id 发送信号。在任何进程组信号成功前，已经观察到 leader 退出时无需发送信号；正数 leader pid 已消失时，EPERM 可以证明进程组已不归当前进程所有。负进程组信号一旦成功，leader 退出不会结束所有权：关闭流程会继续探测负进程组 id 并升级信号，直到操作系统返回 ESRCH。所有权建立后的 EPERM 是清理失败。
 
 ## 曾考虑的替代方案
 
@@ -35,4 +35,4 @@ Web 组合会挂载 Cordis HMR。HMR 在 Electron 的内嵌 Node 运行时中需
 - Desktop 运行时 peer 所有权明确且可机械验证为封闭，无需扩大公开 CLI 清单。
 - 部署根按设计重复列出必需 peer；闭包验证器而不是逐个修复冒烟失败来负责保持清单新鲜。
 - 已暂存原生兼容性由真实 Electron 加载与执行来验收。当闭包携带兼容的 darwin-arm64 N-API 预构建时，`electron-rebuild` 可以报告未发现模块。
-- 运行时冒烟验证原生加载、CLI 版本、严格的回环 URL、HTTP 状态与标题、所拥有进程组的关闭、端口关闭，以及不存在解析回源码检出的符号链接。
+- 运行时冒烟验证原生加载、CLI 版本、严格的回环 URL、HTTP 状态与标题、所拥有进程组的关闭、已关闭端口拒绝 TCP 连接，以及不存在解析回源码检出的符号链接。
