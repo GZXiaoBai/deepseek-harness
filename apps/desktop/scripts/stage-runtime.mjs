@@ -130,7 +130,7 @@ export async function executeStagePlan(plan, options = {}) {
 }
 
 /**
- * Keeps only the node-pty prebuilds supported by the native Desktop target.
+ * Keeps only the node-pty prebuilds and build assets supported by the native Desktop target.
  *
  * @param {string} runtimeDirectory Deployed Desktop runtime package root.
  * @param {{ platform: 'darwin', arch: 'arm64' } | { platform: 'win32', arch: 'x64' }} target Native target.
@@ -223,6 +223,48 @@ export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) 
     )
     await rm(path, { recursive: true })
   }
+
+  const conptyBuildRoot = join(nodePtyDirectory, 'third_party/conpty')
+  await requireOrdinaryInternalDirectory(
+    conptyBuildRoot,
+    canonicalRuntimeDirectory,
+    `Staged node-pty ConPTY build assets must be an ordinary internal directory: ${conptyBuildRoot}`,
+  )
+  let versionCount = 0
+  const versions = await opendir(conptyBuildRoot)
+  for await (const versionEntry of versions) {
+    const versionDirectory = join(conptyBuildRoot, versionEntry.name)
+    await requireOrdinaryInternalDirectory(
+      versionDirectory,
+      canonicalRuntimeDirectory,
+      `Staged node-pty ConPTY build version must be an ordinary internal directory: ${versionDirectory}`,
+    )
+    versionCount += 1
+    const retainedAsset = join(versionDirectory, 'win10-x64')
+    await requireOrdinaryInternalDirectory(
+      retainedAsset,
+      canonicalRuntimeDirectory,
+      `Staged node-pty win10-x64 ConPTY build asset must be an ordinary internal directory: ${retainedAsset}`,
+    )
+    for (const filename of ['conpty.dll', 'OpenConsole.exe']) {
+      await requireOrdinaryFile(
+        join(retainedAsset, filename),
+        `Staged node-pty win10-x64 ConPTY build file is missing: ${filename}`,
+      )
+    }
+    const assets = await opendir(versionDirectory)
+    for await (const assetEntry of assets) {
+      if (assetEntry.name === 'win10-x64') continue
+      const assetPath = join(versionDirectory, assetEntry.name)
+      await requireOrdinaryInternalDirectory(
+        assetPath,
+        canonicalRuntimeDirectory,
+        `Staged unsupported node-pty ConPTY build asset must be an ordinary internal directory: ${assetPath}`,
+      )
+      await rm(assetPath, { recursive: true })
+    }
+  }
+  if (versionCount === 0) throw new Error('Staged node-pty ConPTY build assets are missing')
 }
 
 /** @param {NodeJS.Require} packageRequire @param {string} specifier @param {string} canonicalRuntimeDirectory */

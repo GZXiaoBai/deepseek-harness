@@ -109,6 +109,8 @@ async function createNativeClosure(runtimeDirectory: string, dsh: string): Promi
   await mkdir(join(nodePty, 'prebuilds/darwin-x64'), { recursive: true })
   await mkdir(join(nodePty, 'prebuilds/win32-arm64'), { recursive: true })
   await mkdir(join(nodePty, 'prebuilds/win32-x64/conpty'), { recursive: true })
+  await mkdir(join(nodePty, 'third_party/conpty/1.23.251008001/win10-arm64'), { recursive: true })
+  await mkdir(join(nodePty, 'third_party/conpty/1.23.251008001/win10-x64'), { recursive: true })
   await writeFile(join(nodePty, 'package.json'), JSON.stringify({ name: 'node-pty', version: '1.1.0' }))
   await writeFile(join(nodePty, 'prebuilds/darwin-arm64/pty.node'), 'arm64 pty')
   await writeFile(join(nodePty, 'prebuilds/darwin-arm64/spawn-helper'), 'arm64 helper')
@@ -122,6 +124,10 @@ async function createNativeClosure(runtimeDirectory: string, dsh: string): Promi
   await writeFile(join(nodePty, 'prebuilds/win32-x64/conpty/OpenConsole.exe'), 'x64 console')
   await writeFile(join(nodePty, 'prebuilds/win32-x64/winpty.dll'), 'x64 winpty dll')
   await writeFile(join(nodePty, 'prebuilds/win32-x64/winpty-agent.exe'), 'x64 winpty agent')
+  await writeFile(join(nodePty, 'third_party/conpty/1.23.251008001/win10-arm64/conpty.dll'), 'arm64 build conpty dll')
+  await writeFile(join(nodePty, 'third_party/conpty/1.23.251008001/win10-arm64/OpenConsole.exe'), 'arm64 build console')
+  await writeFile(join(nodePty, 'third_party/conpty/1.23.251008001/win10-x64/conpty.dll'), 'x64 build conpty dll')
+  await writeFile(join(nodePty, 'third_party/conpty/1.23.251008001/win10-x64/OpenConsole.exe'), 'x64 build console')
   await symlink(nodePty, join(dirname(dirname(subprocessLocal)), 'node-pty'))
   const repairScript = join(subprocessLocal, 'scripts/ensure-spawn-helper.mjs')
   await writeFile(repairScript, '')
@@ -161,6 +167,14 @@ function nodePtyPrebuild(
   architecture: 'darwin-arm64' | 'darwin-x64' | 'win32-arm64' | 'win32-x64',
 ): string {
   return join(runtimeDirectory, 'node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/prebuilds', architecture)
+}
+
+function nodePtyConptyBuildAsset(runtimeDirectory: string, architecture: 'win10-arm64' | 'win10-x64'): string {
+  return join(
+    runtimeDirectory,
+    'node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/third_party/conpty/1.23.251008001',
+    architecture,
+  )
 }
 
 function peFixture(machine: number): Buffer {
@@ -355,7 +369,7 @@ describe('desktop runtime staging', () => {
     )
   })
 
-  it('keeps only the Windows x64 node-pty prebuild for a Windows runtime', async () => {
+  it('keeps only the Windows x64 node-pty prebuild and ConPTY build assets for a Windows runtime', async () => {
     const repoRoot = await makeRepository()
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     await createRuntimeClosure(runtimeDirectory)
@@ -365,9 +379,31 @@ describe('desktop runtime staging', () => {
 
     await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'win32-x64'), 'conpty.node'), 'utf8'))
       .resolves.toBe('x64 conpty')
+    await expect(readFile(join(nodePtyConptyBuildAsset(runtimeDirectory, 'win10-x64'), 'conpty.dll'), 'utf8'))
+      .resolves.toBe('x64 build conpty dll')
     await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'win32-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(nodePtyConptyBuildAsset(runtimeDirectory, 'win10-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects a linked unsupported Windows ConPTY build asset without deleting its external target', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await createRuntimeClosure(runtimeDirectory)
+    const externalDirectory = await mkdtemp(join(tmpdir(), 'dsh-node-pty-conpty-arm64-external-'))
+    directories.push(externalDirectory)
+    const marker = join(externalDirectory, 'keep.txt')
+    await writeFile(marker, 'keep')
+    const arm64Asset = nodePtyConptyBuildAsset(runtimeDirectory, 'win10-arm64')
+    await rm(arm64Asset, { recursive: true })
+    await symlink(externalDirectory, arm64Asset)
+    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+
+    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'win32', arch: 'x64' })).rejects.toThrow(
+      'Staged unsupported node-pty ConPTY build asset must be an ordinary internal directory:',
+    )
+    await expect(readFile(marker, 'utf8')).resolves.toBe('keep')
   })
 
   it('rejects any link in a Windows runtime that would require Developer Mode', async () => {
