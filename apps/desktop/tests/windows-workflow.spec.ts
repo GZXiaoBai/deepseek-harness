@@ -44,9 +44,11 @@ describe('Windows Desktop workflow', () => {
     })
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run test:desktop')
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run package:desktop')
-    expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain(
-      'pnpm --filter @deepseek-ai/dsh-desktop run verify:package',
-    )
+    const verifyPackage = job?.steps?.find(step => step.name === 'Verify unpacked App, installation, launch, and uninstall')
+    expect(verifyPackage).toMatchObject({
+      run: 'pnpm --filter @deepseek-ai/dsh-desktop run verify:package',
+      env: { DSH_POWERSHELL_EXECUTABLE: 'pwsh.exe' },
+    })
     const upload = job?.steps?.find(step => step.uses?.startsWith('actions/upload-artifact@'))
     expect(upload?.with).toMatchObject({
       name: 'deepseek-harness-windows-x64',

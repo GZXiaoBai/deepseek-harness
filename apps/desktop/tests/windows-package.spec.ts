@@ -11,6 +11,7 @@ interface WindowsVerifyPlan {
 }
 
 interface WindowsPackageVerifier {
+  resolvePowerShellExecutable?: (environment: NodeJS.ProcessEnv) => string
   createWindowsVerifyPlan?: (input: { desktopRoot: string; platform: NodeJS.Platform; arch: string }) => WindowsVerifyPlan
   findNsisInstaller?: (releaseDirectory: string) => Promise<string>
   validateWindowsAppLayout?: (appDirectory: string) => Promise<{
@@ -48,6 +49,14 @@ async function loadVerifier(): Promise<WindowsPackageVerifier> {
 }
 
 describe('Windows Desktop package verification', () => {
+  it('uses the requested PowerShell host while retaining the Windows inbox default', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.resolvePowerShellExecutable).toBeTypeOf('function')
+
+    expect(verifier.resolvePowerShellExecutable?.({})).toBe('powershell.exe')
+    expect(verifier.resolvePowerShellExecutable?.({ DSH_POWERSHELL_EXECUTABLE: 'pwsh.exe' })).toBe('pwsh.exe')
+  })
+
   it('resolves only the native Windows x64 unpacked artifact', async () => {
     const verifier = await loadVerifier()
     expect(verifier.createWindowsVerifyPlan).toBeTypeOf('function')

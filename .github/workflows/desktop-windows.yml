@@ -73,6 +73,8 @@ jobs:
 
       - name: Verify unpacked App, installation, launch, and uninstall
         shell: pwsh
+        env:
+          DSH_POWERSHELL_EXECUTABLE: pwsh.exe
         run: pnpm --filter @deepseek-ai/dsh-desktop run verify:package
 
       - name: Upload unsigned personal installer
