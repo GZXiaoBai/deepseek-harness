@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApplicationController,
   installTerminationSignalHandlers,
@@ -23,6 +23,7 @@ import {
 const directories: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(directories.splice(0).map(async directory => rm(directory, { force: true, recursive: true })))
 })
 
@@ -120,6 +121,7 @@ class TestSignalSource {
 class TestAdapter implements DesktopAdapter {
   lock = true
   exited = false
+  exitCodes: number[] = []
   quitCount = 0
   menu: ApplicationMenu | undefined
   window: TestWindow | undefined
@@ -137,8 +139,9 @@ class TestAdapter implements DesktopAdapter {
     return this.lock
   }
 
-  exit(): void {
+  exit(code = 0): void {
     this.exited = true
+    this.exitCodes.push(code)
   }
 
   async whenReady(): Promise<void> {
@@ -356,7 +359,73 @@ describe('desktop application controller', () => {
     })).resolves.toBeUndefined()
 
     expect(adapter.exited).toBe(true)
+    expect(adapter.exitCodes).toEqual([0])
     expect(created).toBe(false)
+  })
+
+  it('exits with failure when primary application creation fails', async () => {
+    const adapter = new TestAdapter()
+    const startupFailure = new Error('desktop logger initialization failed')
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(launchDesktopApplication(adapter, async () => {
+      throw startupFailure
+    })).resolves.toBeUndefined()
+
+    expect(adapter.exitCodes).toEqual([1])
+    expect(diagnostic).toHaveBeenCalledWith('DeepSeek Harness desktop startup failed', startupFailure)
+  })
+
+  it('shuts down a created controller before exiting after start fails', async () => {
+    const adapter = new TestAdapter()
+    const startupFailure = new Error('Electron readiness failed')
+    const ready = Promise.withResolvers<undefined>()
+    adapter.ready = ready.promise
+    const harness = new TestHarness()
+    const stop = Promise.withResolvers<undefined>()
+    harness.pendingStop = stop.promise
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const launching = launchDesktopApplication(adapter, async () => (
+      new ApplicationController(await createOptions(adapter, harness))
+    ))
+
+    await expect.poll(() => adapter.menu).toBeDefined()
+    ready.reject(startupFailure)
+    await expect.poll(() => harness.transitions).toEqual(['stop'])
+    expect(adapter.exitCodes).toEqual([])
+
+    stop.resolve(undefined)
+    await expect(launching).resolves.toBeUndefined()
+    expect(adapter.exitCodes).toEqual([1])
+    expect(diagnostic).toHaveBeenCalledWith('DeepSeek Harness desktop startup failed', startupFailure)
+  })
+
+  it('exits and preserves the startup diagnostic when failure cleanup rejects', async () => {
+    const adapter = new TestAdapter()
+    const startupFailure = new Error('Electron readiness failed')
+    const cleanupFailure = new Error('Harness cleanup failed')
+    const ready = Promise.withResolvers<undefined>()
+    adapter.ready = ready.promise
+    const harness = new TestHarness()
+    const stop = Promise.withResolvers<undefined>()
+    harness.pendingStop = stop.promise
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const launching = launchDesktopApplication(adapter, async () => (
+      new ApplicationController(await createOptions(adapter, harness))
+    ))
+
+    await expect.poll(() => adapter.menu).toBeDefined()
+    ready.reject(startupFailure)
+    await expect.poll(() => harness.transitions).toEqual(['stop'])
+    stop.reject(cleanupFailure)
+    await expect(launching).resolves.toBeUndefined()
+
+    expect(adapter.exitCodes).toEqual([1])
+    expect(diagnostic.mock.calls[0]).toEqual(['DeepSeek Harness desktop startup failed', startupFailure])
+    expect(diagnostic).toHaveBeenCalledWith(
+      'DeepSeek Harness desktop cleanup after startup failure failed',
+      cleanupFailure,
+    )
   })
 
   it('shows the startup document before loading the confirmed Harness URL', async () => {

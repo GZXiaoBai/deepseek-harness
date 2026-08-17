@@ -69,7 +69,12 @@ export type StartupFailureAction = 'retry' | 'open-logs' | 'quit'
 /** Narrow Electron application surface consumed by desktop orchestration. */
 export interface DesktopAdapter {
   requestSingleInstanceLock(): boolean
-  exit(): void
+  /**
+   * Exits Electron immediately with the requested process status.
+   *
+   * @param code Process status returned to the operating system.
+   */
+  exit(code: number): void
   whenReady(): Promise<void>
   createWindow(options: DesktopWindowOptions): DesktopWindow
   getDisplayBounds(): DisplayBounds[]
@@ -432,36 +437,52 @@ export class ApplicationController {
 
 /**
  * Acquires the process-wide instance lock before creating any application state.
+ * A fatal creation or start failure is diagnosed before any created controller
+ * is shut down, then the primary Electron process exits with status 1.
  *
  * @param adapter Electron application adapter.
  * @param createApplication Lazy application factory invoked only by the primary instance.
- * @returns The started primary controller, or undefined in a handed-off process.
+ * @returns The started primary controller, or undefined after handoff or fatal startup cleanup.
  */
 export async function launchDesktopApplication(
   adapter: DesktopAdapter,
   createApplication: () => Promise<ApplicationController>,
 ): Promise<ApplicationController | undefined> {
-  if (!adapter.requestSingleInstanceLock()) {
-    adapter.exit()
+  let application: ApplicationController | undefined
+  try {
+    if (!adapter.requestSingleInstanceLock()) {
+      adapter.exit(0)
+      return undefined
+    }
+
+    const activation: {
+      application: ApplicationController | undefined
+      pending: boolean
+    } = { application: undefined, pending: false }
+    adapter.onSecondInstance(() => {
+      if (activation.application === undefined) {
+        activation.pending = true
+      } else {
+        activation.application.activate()
+      }
+    })
+    application = await createApplication()
+    activation.application = application
+    if (activation.pending) application.activate()
+    await application.start()
+    return application
+  } catch (error: unknown) {
+    console.error('DeepSeek Harness desktop startup failed', error)
+    if (application !== undefined) {
+      try {
+        await application.requestShutdown()
+      } catch (shutdownError: unknown) {
+        console.error('DeepSeek Harness desktop cleanup after startup failure failed', shutdownError)
+      }
+    }
+    adapter.exit(1)
     return undefined
   }
-
-  const activation: {
-    application: ApplicationController | undefined
-    pending: boolean
-  } = { application: undefined, pending: false }
-  adapter.onSecondInstance(() => {
-    if (activation.application === undefined) {
-      activation.pending = true
-    } else {
-      activation.application.activate()
-    }
-  })
-  const application = await createApplication()
-  activation.application = application
-  if (activation.pending) application.activate()
-  await application.start()
-  return application
 }
 
 type ElectronModule = typeof import('electron')
@@ -545,8 +566,8 @@ class ElectronAdapter implements DesktopAdapter {
     return this.#electron.app.requestSingleInstanceLock()
   }
 
-  exit(): void {
-    this.#electron.app.exit(0)
+  exit(code: number): void {
+    this.#electron.app.exit(code)
   }
 
   whenReady(): Promise<void> {
@@ -665,6 +686,6 @@ function asError(error: unknown, fallback: string): Error {
 if (Object.prototype.hasOwnProperty.call(process.versions, 'electron')) {
   void runElectronMain().catch((error: unknown) => {
     console.error('DeepSeek Harness desktop startup failed', error)
-    process.exitCode = 1
+    process.exit(1)
   })
 }

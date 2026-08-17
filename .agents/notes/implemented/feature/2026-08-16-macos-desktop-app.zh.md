@@ -26,7 +26,7 @@ Desktop 应用只拥有自己创建的分离式进程组。退出、重试、应
 
 Electron 拥有 `~/Library/Application Support/DeepSeek Harness`，包括 `window-state.json`、`Logs/desktop.log` 和它的单实例文件。后端收到作为独立 `Harness/` 子树的 `DSH_HOME`，因此 Harness 文件监视器不会观察到 Electron 的单实例 socket。替换 App 时，Desktop 和 Harness 数据都会保持不变。
 
-应用会强制一个 Electron 实例与一个后端。第二次启动只会聚焦现有窗口，不会启动另一个后端。启动失败会留在一个无脚本的本地文档中，并提供重试、打开日志目录或退出选项。
+应用会强制一个 Electron 实例与一个后端。第二次启动只会聚焦现有窗口，不会启动另一个后端。可恢复的启动失败会留在一个无脚本的本地文档中，并提供重试、打开日志目录或退出选项。致命的初始化或控制器启动失败会在清理前报告；已有控制器会先关闭，随后 Electron 以状态码 1 退出。清理失败会另行报告，不能取代启动诊断，也不能让主实例继续持有单实例锁。
 
 ## 验证
 
