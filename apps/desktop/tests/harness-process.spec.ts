@@ -173,7 +173,7 @@ describe('HarnessProcessController', () => {
   })
 
   it('times out when the child does not emit a strict harness URL', async () => {
-    const { controller, kills } = await createController(['non-matching-output'], { startupTimeoutMs: 100 })
+    const { controller, kills } = await createController(['non-matching-output'], { startupTimeoutMs: 500 })
 
     await expect(controller.start()).rejects.toThrow('timed out')
     expect(kills.map(([pid]) => pid).every(pid => pid < 0)).toBe(true)
@@ -383,7 +383,7 @@ describe('HarnessProcessController', () => {
   })
 
   it('writes line-delimited safe child output metadata to the desktop log', async () => {
-    const { controller } = await createController(['non-matching-output'], { startupTimeoutMs: 100 })
+    const { controller } = await createController(['non-matching-output'], { startupTimeoutMs: 500 })
 
     await expect(controller.start()).rejects.toThrow('timed out')
     const entries = (await readFile(join(userDataDirectories[0]!, 'Logs', 'desktop.log'), 'utf8'))
