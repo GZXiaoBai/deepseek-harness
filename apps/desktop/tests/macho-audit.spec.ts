@@ -61,7 +61,7 @@ function fixtureInspectors(x64Node: string) {
   }
 }
 
-describe('Apple Silicon Mach-O audit', () => {
+describe.skipIf(process.platform === 'win32')('Apple Silicon Mach-O audit', () => {
   it('rejects a dormant x86_64-only native prebuild', async () => {
     const fixture = await makeFixture()
     const { auditArm64MachO } = await loadAudit()

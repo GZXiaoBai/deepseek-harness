@@ -12,6 +12,7 @@ import { HarnessProcessController, type HarnessProcessOptions, type HarnessProce
 const fixturePath = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url))
 const userDataDirectories: string[] = []
 const processGroups: number[] = []
+const posixIt = process.platform === 'win32' ? it.skip : it
 
 afterEach(async () => {
   for (const pid of processGroups.splice(0)) {
@@ -47,13 +48,15 @@ async function createController(
     if (mode === undefined) throw new Error('Expected a fixture mode for every spawned child')
     const child = spawn(command, [...args, '--mode', mode], options)
     children.push(child)
-    if (child.pid !== undefined) processGroups.push(child.pid)
+    if (child.pid !== undefined && options.detached === true) processGroups.push(child.pid)
     return child
   }
 
   return {
     controller: new HarnessProcessController({
-      target: { platform: 'darwin', arch: 'arm64' },
+      target: process.platform === 'win32'
+        ? { platform: 'win32', arch: 'x64' }
+        : { platform: 'darwin', arch: 'arm64' },
       executable: process.execPath,
       cliPath: fixturePath,
       cwd: process.cwd(),
@@ -65,6 +68,9 @@ async function createController(
       killProcessGroup: (pid, signal) => {
         kills.push([pid, signal])
         process.kill(pid, signal)
+      },
+      terminateWindowsProcessTree: async (pid) => {
+        process.kill(pid, 'SIGKILL')
       },
       ...overrides,
     }),
@@ -189,8 +195,10 @@ describe('HarnessProcessController', () => {
 
     await expect(controller.start()).rejects.toThrow('health check refused the URL')
     expect(children[0]?.exitCode ?? children[0]?.signalCode).not.toBeNull()
-    expect(kills.map(([pid]) => pid).every(pid => pid < 0)).toBe(true)
-    expect(kills.map(([, signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL'])
+    if (process.platform !== 'win32') {
+      expect(kills.map(([pid]) => pid).every(pid => pid < 0)).toBe(true)
+      expect(kills.map(([, signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL'])
+    }
   })
 
   it('preserves the startup timeout when it aborts a pending health check', async () => {
@@ -241,7 +249,7 @@ describe('HarnessProcessController', () => {
     await expect(starting).rejects.toThrow('stopped')
   })
 
-  it('stops a ready process group with SIGTERM and tolerates a repeated stop', async () => {
+  posixIt('stops a ready process group with SIGTERM and tolerates a repeated stop', async () => {
     const { controller, kills, children } = await createController(['normal'])
 
     await controller.start()
@@ -252,7 +260,7 @@ describe('HarnessProcessController', () => {
     expect(kills).toEqual([[-pid!, 'SIGTERM']])
   })
 
-  it('escalates an uncooperative process group to SIGKILL', async () => {
+  posixIt('escalates an uncooperative process group to SIGKILL', async () => {
     const { controller, kills, children } = await createController(['ignore-term'])
 
     await controller.start()
@@ -320,7 +328,7 @@ describe('HarnessProcessController', () => {
     await expect(controller.stop()).resolves.toBeUndefined()
   })
 
-  it('reaps an ignoring descendant after its leader exits on SIGTERM before allowing retry', async () => {
+  posixIt('reaps an ignoring descendant after its leader exits on SIGTERM before allowing retry', async () => {
     const { controller, kills, children } = await createController(['leader-with-ignoring-descendant', 'normal'])
 
     await controller.start()
@@ -332,7 +340,7 @@ describe('HarnessProcessController', () => {
     await controller.stop()
   })
 
-  it('retains a live process group after a signal failure until a later stop establishes cleanup', async () => {
+  posixIt('retains a live process group after a signal failure until a later stop establishes cleanup', async () => {
     let rejectSignals = true
     const { controller } = await createController(['normal', 'normal'], {
       killProcessGroup: (pid, signal) => {
