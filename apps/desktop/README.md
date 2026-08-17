@@ -24,7 +24,7 @@ The application has no updater. Build and replace it manually when updating.
 
 ## Data and logs
 
-Electron owns `~/Library/Application Support/DeepSeek Harness`. Window bounds are stored in `window-state.json`, and desktop lifecycle logs are appended to `Logs/desktop.log`. Harness owns the `Harness/` subtree below that directory, including configuration, profiles, and sessions. Replacing the App or DMG leaves this directory unchanged; removing it resets both Desktop and Harness state. If initialization fails before the recovery UI can take over, the app reports the original error, stops an already-created controller, and exits with status 1; a cleanup error is reported separately and cannot leave the primary instance running.
+Electron owns `~/Library/Application Support/DeepSeek Harness`. Window bounds are stored in `window-state.json`, and desktop lifecycle logs are appended to `Logs/desktop.log`. Harness owns the `Harness/` subtree below that directory, including configuration, profiles, and sessions. Replacing the App or DMG leaves this directory unchanged; removing it resets both Desktop and Harness state. If initialization fails before the recovery UI can take over, the app records the original failure and, when a controller exists, attempts and awaits its shutdown. A cleanup failure is reported separately and means backend termination is not guaranteed. Electron still exits with status 1 and releases the single-instance lock.
 
 ## Verify
 

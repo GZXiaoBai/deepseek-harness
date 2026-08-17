@@ -24,7 +24,7 @@ pnpm run package:desktop
 
 ## 数据与日志
 
-Electron 拥有 `~/Library/Application Support/DeepSeek Harness`。窗口边界存储在 `window-state.json` 中，桌面生命周期日志追加到 `Logs/desktop.log`。Harness 拥有该目录下的 `Harness/` 子树，包括配置、profile 和会话。替换 App 或 DMG 不会改动此目录；删除它会重置 Desktop 和 Harness 状态。如果初始化在恢复界面接管前失败，应用会报告原始错误，停止已经创建的控制器，并以状态码 1 退出；清理错误会另行报告，不能让主实例继续运行。
+Electron 拥有 `~/Library/Application Support/DeepSeek Harness`。窗口边界存储在 `window-state.json` 中，桌面生命周期日志追加到 `Logs/desktop.log`。Harness 拥有该目录下的 `Harness/` 子树，包括配置、profile 和会话。替换 App 或 DMG 不会改动此目录；删除它会重置 Desktop 和 Harness 状态。如果初始化在恢复界面接管前失败，应用会记录原始错误；如果控制器已创建，应用会尝试并等待其关闭。清理失败会另行报告，此时不能保证后端终止。Electron 仍会以状态码 1 退出并释放单实例锁。
 
 ## 验证
 
