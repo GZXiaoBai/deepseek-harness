@@ -201,7 +201,7 @@ describe('HarnessProcessController', () => {
   it('preserves the startup timeout when it aborts a pending health check', async () => {
     const healthCheckStarted = Promise.withResolvers<undefined>()
     const { controller } = await createController(['normal'], {
-      startupTimeoutMs: 100,
+      startupTimeoutMs: 500,
       healthCheck: async (_url, signal) => {
         healthCheckStarted.resolve(undefined)
         await new Promise<never>((_resolve, reject) => {
@@ -213,9 +213,9 @@ describe('HarnessProcessController', () => {
     })
 
     const starting = controller.start()
+    const expectedTimeout = expect(starting).rejects.toThrow('Harness startup timed out after 500ms')
     await healthCheckStarted.promise
-
-    await expect(starting).rejects.toThrow('Harness startup timed out after 100ms')
+    await expectedTimeout
   })
 
   it('does not let retry start until a failed attempt has reaped its process group', async () => {
