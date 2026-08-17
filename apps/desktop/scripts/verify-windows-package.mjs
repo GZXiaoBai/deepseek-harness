@@ -97,14 +97,11 @@ export async function validateWindowsAppLayout(appDirectory) {
  * Derives the per-user installation, shortcut, and application-data paths used by NSIS acceptance.
  *
  * @param {{ localAppData: string, appData: string, desktopDirectory: string }} input Windows user directories.
- * @returns {{ installDirectory: string, executable: string, uninstaller: string, startMenuShortcut: string, desktopShortcut: string, userData: string }} Installed paths.
+ * @returns {{ programsDirectory: string, startMenuShortcut: string, desktopShortcut: string, userData: string }} Installed paths.
  */
 export function createWindowsInstallPaths(input) {
-  const installDirectory = win32.join(input.localAppData, 'Programs', PRODUCT_NAME)
   return {
-    installDirectory,
-    executable: win32.join(installDirectory, `${PRODUCT_NAME}.exe`),
-    uninstaller: win32.join(installDirectory, `Uninstall ${PRODUCT_NAME}.exe`),
+    programsDirectory: win32.join(input.localAppData, 'Programs'),
     startMenuShortcut: win32.join(
       input.appData,
       'Microsoft',
@@ -115,6 +112,38 @@ export function createWindowsInstallPaths(input) {
     ),
     desktopShortcut: win32.join(input.desktopDirectory, `${PRODUCT_NAME}.lnk`),
     userData: win32.join(input.appData, PRODUCT_NAME),
+  }
+}
+
+/**
+ * Resolves the actual one-click NSIS directory from its Start Menu target.
+ * Electron Builder deliberately uses a sanitized package name for this directory.
+ *
+ * @param {{ programsDirectory: string, shortcutTarget: string }} input Trusted per-user root and shortcut target.
+ * @returns {{ installDirectory: string, executable: string, uninstaller: string }} Validated installed paths.
+ */
+export function createInstalledWindowsPaths(input) {
+  const programsDirectory = win32.resolve(input.programsDirectory)
+  const executable = win32.resolve(input.shortcutTarget)
+  if (win32.basename(executable).toLowerCase() !== `${PRODUCT_NAME}.exe`.toLowerCase()) {
+    throw new Error(`NSIS shortcut target does not name ${PRODUCT_NAME}.exe: ${executable}`)
+  }
+  const installDirectory = win32.dirname(executable)
+  const fromPrograms = win32.relative(programsDirectory, installDirectory)
+  if (
+    installDirectory === programsDirectory
+    || fromPrograms === '..'
+    || fromPrograms.startsWith(`..${win32.sep}`)
+    || win32.isAbsolute(fromPrograms)
+  ) {
+    throw new Error(
+      `NSIS shortcut target is outside the current-user Programs directory: ${executable}`,
+    )
+  }
+  return {
+    installDirectory,
+    executable,
+    uninstaller: win32.join(installDirectory, `Uninstall ${PRODUCT_NAME}.exe`),
   }
 }
 
@@ -158,28 +187,33 @@ async function verifyInstalledWindowsPackage(installer) {
   const userData = join(acceptanceRoot, 'user-data')
   const preservationMarker = join(paths.userData, `desktop-installer-preserve-${process.pid}.txt`)
   let installed = false
+  let installedPaths
   try {
-    await requireMissing(paths.installDirectory, 'Refusing to replace a pre-existing per-user installation')
+    await requireMissing(paths.startMenuShortcut, 'Refusing to replace a pre-existing per-user installation')
     await run(installer, ['/S'], { windowsHide: true })
     installed = true
-    const layout = await validateWindowsAppLayout(paths.installDirectory)
-    await requireUnsigned(layout.executable)
     await requireOrdinaryFile(paths.startMenuShortcut, 'NSIS did not create the Start Menu shortcut')
     await requireMissing(paths.desktopShortcut, 'NSIS created the forbidden Desktop shortcut')
+    installedPaths = createInstalledWindowsPaths({
+      programsDirectory: paths.programsDirectory,
+      shortcutTarget: await readWindowsShortcutTarget(paths.startMenuShortcut),
+    })
+    const layout = await validateWindowsAppLayout(installedPaths.installDirectory)
+    await requireUnsigned(layout.executable)
     await verifyWindowsLaunch(layout.executable, userData, acceptanceRoot)
 
     await mkdir(paths.userData, { recursive: true })
     await writeFile(preservationMarker, 'preserve')
-    await run(paths.uninstaller, ['/S'], { windowsHide: true })
+    await run(installedPaths.uninstaller, ['/S'], { windowsHide: true })
     installed = false
-    await waitForMissing(paths.installDirectory, SHUTDOWN_TIMEOUT_MS)
+    await waitForMissing(installedPaths.installDirectory, SHUTDOWN_TIMEOUT_MS)
     await requireMissing(paths.startMenuShortcut, 'NSIS uninstall left the Start Menu shortcut')
     await requireMissing(paths.desktopShortcut, 'NSIS uninstall left the Desktop shortcut')
     await requireOrdinaryFile(preservationMarker, 'NSIS uninstall removed preserved application data')
   } finally {
-    if (installed) {
+    if (installed && installedPaths !== undefined) {
       try {
-        await run(paths.uninstaller, ['/S'], { windowsHide: true })
+        await run(installedPaths.uninstaller, ['/S'], { windowsHide: true })
       } catch {
         // The acceptance error remains primary; a stale CI installation is visible on the next fail-fast run.
       }
@@ -191,6 +225,17 @@ async function verifyInstalledWindowsPackage(installer) {
     }
     await rm(acceptanceRoot, { recursive: true })
   }
+}
+
+/** @param {string} shortcut */
+async function readWindowsShortcutTarget(shortcut) {
+  const result = await runPowerShell(
+    '(New-Object -ComObject WScript.Shell).CreateShortcut($env:DSH_VERIFY_SHORTCUT).TargetPath',
+    { DSH_VERIFY_SHORTCUT: shortcut },
+  )
+  const target = result.stdout.trim()
+  if (target === '') throw new Error(`NSIS Start Menu shortcut has no target: ${shortcut}`)
+  return target
 }
 
 /** @param {string} executable @param {string} userData @param {string} cwd */

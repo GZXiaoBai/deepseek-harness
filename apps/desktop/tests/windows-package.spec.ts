@@ -24,12 +24,18 @@ interface WindowsPackageVerifier {
     appData: string
     desktopDirectory: string
   }) => {
-    installDirectory: string
-    executable: string
-    uninstaller: string
+    programsDirectory: string
     startMenuShortcut: string
     desktopShortcut: string
     userData: string
+  }
+  createInstalledWindowsPaths?: (input: {
+    programsDirectory: string
+    shortcutTarget: string
+  }) => {
+    installDirectory: string
+    executable: string
+    uninstaller: string
   }
 }
 
@@ -162,13 +168,43 @@ describe('Windows Desktop package verification', () => {
       appData: 'C:\\Users\\me\\AppData\\Roaming',
       desktopDirectory: 'C:\\Users\\me\\Desktop',
     })).toEqual({
-      installDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs\\DeepSeek Harness',
-      executable: 'C:\\Users\\me\\AppData\\Local\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe',
-      uninstaller: 'C:\\Users\\me\\AppData\\Local\\Programs\\DeepSeek Harness\\Uninstall DeepSeek Harness.exe',
+      programsDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs',
       startMenuShortcut: 'C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\DeepSeek Harness.lnk',
       desktopShortcut: 'C:\\Users\\me\\Desktop\\DeepSeek Harness.lnk',
       userData: 'C:\\Users\\me\\AppData\\Roaming\\DeepSeek Harness',
     })
+  })
+
+  it('derives the actual per-user install directory from the Start Menu shortcut target', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.createInstalledWindowsPaths).toBeTypeOf('function')
+
+    expect(verifier.createInstalledWindowsPaths?.({
+      programsDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs',
+      shortcutTarget: 'C:\\Users\\me\\AppData\\Local\\Programs\\@deepseek-aidsh-desktop\\DeepSeek Harness.exe',
+    })).toEqual({
+      installDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs\\@deepseek-aidsh-desktop',
+      executable: 'C:\\Users\\me\\AppData\\Local\\Programs\\@deepseek-aidsh-desktop\\DeepSeek Harness.exe',
+      uninstaller: 'C:\\Users\\me\\AppData\\Local\\Programs\\@deepseek-aidsh-desktop\\Uninstall DeepSeek Harness.exe',
+    })
+  })
+
+  it('rejects a shortcut target outside the current-user Programs directory', async () => {
+    const verifier = await loadVerifier()
+
+    expect(() => verifier.createInstalledWindowsPaths?.({
+      programsDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs',
+      shortcutTarget: 'C:\\Program Files\\DeepSeek Harness\\DeepSeek Harness.exe',
+    })).toThrow('NSIS shortcut target is outside the current-user Programs directory')
+  })
+
+  it('rejects a shortcut target with the wrong application executable', async () => {
+    const verifier = await loadVerifier()
+
+    expect(() => verifier.createInstalledWindowsPaths?.({
+      programsDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs',
+      shortcutTarget: 'C:\\Users\\me\\AppData\\Local\\Programs\\DeepSeek Harness\\other.exe',
+    })).toThrow('NSIS shortcut target does not name DeepSeek Harness.exe')
   })
 })
 
