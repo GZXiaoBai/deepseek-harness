@@ -1,0 +1,43 @@
+# Agent Note: 引入 macOS 桌面包装层
+
+Status: implemented
+
+[English](2026-08-16-macos-desktop-app.md) | 中文
+
+## 问题
+
+DeepSeek Harness 通过 Host/Web 组合提供浏览器界面。希望获得应用程序包的 macOS 用户需要原生启动器，同时不能重复实现 host 组合、静态资源服务、浏览器协议处理或现有 Web UI。
+
+## 决策
+
+`@deepseek-ai/dsh-desktop` 是一个面向搭载 macOS 14 或更高版本的 Apple Silicon Mac 的 Electron 包装层。它使用固定的 `web --host 127.0.0.1 --port 0` 参数，把已暂存的 `@deepseek-ai/dsh` CLI（命令行界面）作为一个分离式后端进程启动，等待获得严格的回环 URL 与 HTTP 健康响应，再在应用窗口中打开同一来源。`@deepseek-ai/dsh-host-webserver` 按 [GUI 分层决策](../architecture/2026-07-19-gui-layering-and-rpc-protocol.md)继续拥有 HTTP 服务、API 路由、前端交付以及浏览器可见启动职责。
+
+采用 `file://` 且由 IPC 支持 host 的应用仍属于一套独立架构。它必须替代 HTTP 服务器的资源、请求、生命周期和安全职责，才能替代回环 HTTP；两种传输方式并非别名关系。
+
+## 安全与运行时边界
+
+渲染器启用上下文隔离和沙箱，禁用 Node 集成，也没有 preload API。顶层内容仅限已确认的 `http://127.0.0.1:<ephemeral-port>` 来源：允许同源导航，其他 HTTP 和 HTTPS 目标在外部打开，不安全或格式错误的 scheme 会被拒绝。登录 shell 只提供 `PATH`；它的其他环境值既不导入，也不记录。
+
+Desktop 应用只拥有自己创建的分离式进程组。退出、重试、应用信号和意外退出共用一个关闭屏障：所拥有的进程组先收到 `SIGTERM`，可在 5 秒内退出，否则会收到 `SIGKILL`。应用既不发现，也不向无关 Harness 进程发送信号。
+
+打包后端使用[封闭运行时决策](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)所述的私有已验证依赖部署。打包目标固定为 `darwin-arm64`，会拒绝其他所有宿主目标、审计所有 Mach-O 文件是否为 arm64，并在签名前把已包含的运行时复制到 App 内。所有交付的代码对象均使用带 Hardened Runtime 的 ad-hoc 签名；原生模块只会收到已审查的 JIT、未签名可执行内存和库验证 entitlements。此个人构建未经公证，也没有更新器。
+
+## 数据与生命周期边界
+
+Electron 拥有 `~/Library/Application Support/DeepSeek Harness`，包括 `window-state.json`、`Logs/desktop.log` 和它的单实例文件。后端收到作为独立 `Harness/` 子树的 `DSH_HOME`，因此 Harness 文件监视器不会观察到 Electron 的单实例 socket。替换 App 时，Desktop 和 Harness 数据都会保持不变。
+
+应用会强制一个 Electron 实例与一个后端。第二次启动只会聚焦现有窗口，不会启动另一个后端。启动失败会留在一个无脚本的本地文档中，并提供重试、打开日志目录或退出选项。
+
+## 验证
+
+行为测试固定了 URL 解析与导航、渲染器偏好、单实例启动、重试、进程组所有权、关闭竞态、数据根目录分离、运行时闭包、暂存包含性、arm64 二进制文件和打包配置。真实打包验收会启动复制到仓库外的 App 以及从 DMG 挂载的 App；它会验证通过 HTTP 提供的现有 Web UI、第二次启动后不变的后端身份、已持久化的 Harness 数据、退出后关闭的 TCP 端口与进程组、应用包包含性，以及每个代码对象的签名和 entitlements。
+
+## 曾考虑的替代方案
+
+**立即使用 `file://` 加载 Web 前端。** 这可以移除本地监听器，但需要新的 IPC API 和安全的资源加载模型，同时会改变已建立的 Host/Web 请求路径。桌面包装层保留了该路径。
+
+**将 Host/Web 逻辑直接嵌入 Electron。** 这会让 Electron 拥有已由 `@deepseek-ai/dsh-host-webserver` 负责的组合和启动行为，形成两套需要保持一致的实现。
+
+## 结果
+
+应用在自包含 App 与 DMG 中保留现有 Web UI 和 Host/Web 行为，回环监听器、后端生命周期、封闭运行时与 macOS 签名则成为 Desktop 拥有的职责。分发方式有意保持个人用途：因为 ad-hoc 构建未经公证，Gatekeeper 可能要求显式允许首次启动，更新则需要重新构建并替换 App。Electron 原生 IPC host 仍可实现，但它需要新的传输决策，不能通过增量重解本决策来完成。
