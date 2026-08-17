@@ -62,9 +62,10 @@ export async function findNsisInstaller(releaseDirectory) {
  * Validates ordinary Windows application roots, runtime anchors, filesystem links, and PE architectures.
  *
  * @param {string} appDirectory Unpacked or installed Electron application directory.
+ * @param {{ expectedNonX64Pe?: Readonly<Record<string, number>> }} [options] Exact reviewed packaging-tool exceptions.
  * @returns {Promise<{ executable: string, runtime: string, peFiles: readonly string[] }>} Validated paths and PE inventory.
  */
-export async function validateWindowsAppLayout(appDirectory) {
+export async function validateWindowsAppLayout(appDirectory, options = {}) {
   await requireOrdinaryDirectory(appDirectory, 'Packaged Windows application must be an ordinary directory')
   const resources = join(appDirectory, 'resources')
   const runtime = join(resources, 'runtime')
@@ -88,7 +89,7 @@ export async function validateWindowsAppLayout(appDirectory) {
   if (process.platform === 'win32') await requireNoWindowsReparsePoints(appDirectory)
   await resolveCliEntryPath(runtime)
   await resolveWebFrontendIndex(runtime)
-  const peFiles = await auditX64Pe(appDirectory)
+  const peFiles = await auditX64Pe(appDirectory, options)
   if (peFiles.length === 0) throw new Error('Packaged Windows application contains no PE binaries')
   return { executable, runtime, peFiles }
 }
@@ -198,8 +199,12 @@ async function verifyInstalledWindowsPackage(installer) {
       programsDirectory: paths.programsDirectory,
       shortcutTarget: await readWindowsShortcutTarget(paths.startMenuShortcut),
     })
-    const layout = await validateWindowsAppLayout(installedPaths.installDirectory)
+    await requireOrdinaryFile(installedPaths.uninstaller, 'NSIS uninstaller is missing')
+    const layout = await validateWindowsAppLayout(installedPaths.installDirectory, {
+      expectedNonX64Pe: { [installedPaths.uninstaller]: 0x014c },
+    })
     await requireUnsigned(layout.executable)
+    await requireUnsigned(installedPaths.uninstaller)
     await verifyWindowsLaunch(layout.executable, userData, acceptanceRoot)
 
     await mkdir(paths.userData, { recursive: true })
