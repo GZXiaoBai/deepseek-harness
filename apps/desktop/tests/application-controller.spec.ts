@@ -41,6 +41,7 @@ class TestWindow implements DesktopWindow {
   readonly #loadUrlBarrier: Promise<void>
   #closed: (() => void) | undefined
   #destroyed = false
+  #operationsDestroyed = false
 
   constructor(options: DesktopWindowOptions, loadFileBarrier: Promise<void>, loadUrlBarrier: Promise<void>) {
     this.options = options
@@ -49,7 +50,7 @@ class TestWindow implements DesktopWindow {
   }
 
   async loadFile(path: string): Promise<void> {
-    if (this.#destroyed) throw new Error('Object has been destroyed')
+    if (this.#operationsDestroyed) throw new Error('Object has been destroyed')
     this.loaded.push(path)
     await this.#loadFileBarrier
   }
@@ -57,7 +58,7 @@ class TestWindow implements DesktopWindow {
   async loadUrl(url: string): Promise<void> {
     this.loaded.push(url)
     await this.#loadUrlBarrier
-    if (this.#destroyed) throw new Error('Object has been destroyed')
+    if (this.#operationsDestroyed) throw new Error('Object has been destroyed')
   }
 
   reload(): void {
@@ -111,7 +112,7 @@ class TestWindow implements DesktopWindow {
   }
 
   destroyBeforeClosedEvent(): void {
-    this.#destroyed = true
+    this.#operationsDestroyed = true
   }
 
   emitClosed(): void {
@@ -474,7 +475,7 @@ describe('desktop application controller', () => {
     expect(adapter.window?.loaded).toEqual([options.startupDocument, 'http://127.0.0.1:43127/'])
   })
 
-  it('shuts down cleanly when the window is destroyed during confirmed URL loading', async () => {
+  it('shuts down cleanly when Electron reports destroyed before the window state updates', async () => {
     const adapter = new TestAdapter()
     const urlLoad = Promise.withResolvers<undefined>()
     adapter.windowUrlLoad = urlLoad.promise
