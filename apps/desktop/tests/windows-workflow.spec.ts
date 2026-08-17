@@ -26,7 +26,7 @@ describe('Windows Desktop workflow', () => {
     expect(workflow.on).toMatchObject({ pull_request: {}, workflow_dispatch: {} })
     expect(workflow.permissions).toEqual({ contents: 'read' })
     const job = workflow.jobs?.['windows-desktop']
-    expect(String(job?.['runs-on'])).toContain('dsh-windows-2025-16core')
+    expect(String(job?.['runs-on'])).toContain("|| 'windows-2025'")
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run test:desktop')
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run package:desktop')
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain(
