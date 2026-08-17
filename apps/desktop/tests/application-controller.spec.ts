@@ -34,6 +34,7 @@ class TestWindow implements DesktopWindow {
   minimized = false
   visible = false
   reloads = 0
+  urlLoadError: Error | undefined
   #bounds = { x: 20, y: 30, width: 1100, height: 720 }
   #open: ((url: string) => void) | undefined
   #navigate: ((url: string) => boolean) | undefined
@@ -58,6 +59,7 @@ class TestWindow implements DesktopWindow {
   async loadUrl(url: string): Promise<void> {
     this.loaded.push(url)
     await this.#loadUrlBarrier
+    if (this.urlLoadError !== undefined) throw this.urlLoadError
     if (this.#operationsDestroyed) throw new Error('Object has been destroyed')
   }
 
@@ -489,6 +491,31 @@ describe('desktop application controller', () => {
       'http://127.0.0.1:43127/',
     ])
     adapter.window?.destroyBeforeClosedEvent()
+    urlLoad.resolve(undefined)
+    await launching
+
+    await expect.poll(() => adapter.quitCount).toBe(1)
+    expect(harness.transitions).toEqual(['start', 'stop'])
+    expect(adapter.exitCodes).toEqual([])
+    expect(diagnostic).not.toHaveBeenCalled()
+  })
+
+  it('shuts down cleanly when the failure page is destroyed after a URL load error', async () => {
+    const adapter = new TestAdapter()
+    const urlLoad = Promise.withResolvers<undefined>()
+    adapter.windowUrlLoad = urlLoad.promise
+    const harness = new TestHarness()
+    const options = await createOptions(adapter, harness)
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const launching = launchDesktopApplication(adapter, async () => new ApplicationController(options))
+
+    await expect.poll(() => adapter.window?.loaded).toEqual([
+      options.startupDocument,
+      'http://127.0.0.1:43127/',
+    ])
+    if (adapter.window === undefined) throw new Error('Desktop test window was not created')
+    adapter.window.urlLoadError = new Error('ERR_FAILED (-2) loading the Harness page')
+    adapter.window.destroyBeforeClosedEvent()
     urlLoad.resolve(undefined)
     await launching
 
