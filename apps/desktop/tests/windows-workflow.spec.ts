@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
 interface WorkflowStep {
+  name?: string
   uses?: string
   run?: string
+  env?: Record<string, string>
+  'timeout-minutes'?: number
   with?: Record<string, unknown>
 }
 
@@ -27,6 +30,18 @@ describe('Windows Desktop workflow', () => {
     expect(workflow.permissions).toEqual({ contents: 'read' })
     const job = workflow.jobs?.['windows-desktop']
     expect(String(job?.['runs-on'])).toContain("|| 'windows-2025'")
+    const electronCache = job?.steps?.find(step => step.name === 'Restore Electron binary cache')
+    expect(electronCache?.uses).toBe('actions/cache@v5')
+    expect(electronCache?.with).toMatchObject({
+      path: '${{ runner.temp }}/dsh-electron',
+      key: "windows-electron-${{ hashFiles('apps/desktop/package.json') }}-win32-x64",
+    })
+    const provisionElectron = job?.steps?.find(step => step.name === 'Provision verified Electron binary')
+    expect(provisionElectron).toMatchObject({
+      run: '& apps/desktop/scripts/provision-windows-electron.ps1',
+      env: { GH_TOKEN: '${{ github.token }}' },
+      'timeout-minutes': 10,
+    })
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run test:desktop')
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run package:desktop')
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain(
@@ -39,5 +54,21 @@ describe('Windows Desktop workflow', () => {
       'if-no-files-found': 'error',
       'retention-days': 14,
     })
+  })
+
+  it('provisions Electron from the authenticated release asset with checksum and executable verification', async () => {
+    const provisionScript = await readFile(
+      join(import.meta.dirname, '../scripts/provision-windows-electron.ps1'),
+      'utf8',
+    )
+
+    expect(provisionScript).toContain('gh release download')
+    expect(provisionScript).toContain('electron/electron')
+    expect(provisionScript).toContain('checksums.json')
+    expect(provisionScript).toContain('Get-FileHash')
+    expect(provisionScript).toContain('Expand-Archive')
+    expect(provisionScript).toContain('electron.exe')
+    expect(provisionScript).toContain('path.txt')
+    expect(provisionScript).not.toMatch(/Invoke-WebRequest|curl\.exe/)
   })
 })
