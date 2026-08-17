@@ -643,6 +643,7 @@ function toElectronMenuItem(item: ApplicationMenuItem): MenuItemConstructorOptio
   if (item.type === 'separator') return { type: 'separator' }
   const electronItem: MenuItemConstructorOptions = {}
   if (item.label !== undefined) electronItem.label = item.label
+  if (item.role !== undefined) electronItem.role = item.role
   if (item.accelerator !== undefined) electronItem.accelerator = item.accelerator
   if (item.action !== undefined) electronItem.click = item.action
   if (item.submenu !== undefined) electronItem.submenu = item.submenu.map(toElectronMenuItem)
