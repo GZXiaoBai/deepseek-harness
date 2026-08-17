@@ -40,6 +40,7 @@ interface WindowsPackageVerifier {
     executable: string
     uninstaller: string
   }
+  waitForWindowsUninstallCleanup?: (paths: readonly string[], timeoutMs: number) => Promise<void>
 }
 
 const verifierUrl = pathToFileURL(join(import.meta.dirname, '../scripts/verify-windows-package.mjs')).href
@@ -258,6 +259,37 @@ describe('Windows Desktop package verification', () => {
       programsDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs',
       shortcutTarget: 'C:\\Users\\me\\AppData\\Local\\Programs\\DeepSeek Harness\\other.exe',
     })).toThrow('NSIS shortcut target does not name DeepSeek Harness.exe')
+  })
+
+  it('waits for every asynchronously removed NSIS path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-uninstall-cleanup-'))
+    directories.push(root)
+    const installDirectory = join(root, 'application')
+    const shortcut = join(root, 'DeepSeek Harness.lnk')
+    await mkdir(installDirectory)
+    await writeFile(shortcut, 'shortcut')
+    const verifier = await loadVerifier()
+    expect(verifier.waitForWindowsUninstallCleanup).toBeTypeOf('function')
+
+    const cleanup = verifier.waitForWindowsUninstallCleanup?.([installDirectory, shortcut], 1_000)
+    await rm(installDirectory, { recursive: true })
+    await new Promise(resolve => setTimeout(resolve, 100))
+    await rm(shortcut)
+
+    await expect(cleanup).resolves.toBeUndefined()
+  })
+
+  it('rejects an NSIS path that remains after the cleanup deadline', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-uninstall-residue-'))
+    directories.push(root)
+    const shortcut = join(root, 'DeepSeek Harness.lnk')
+    await writeFile(shortcut, 'shortcut')
+    const verifier = await loadVerifier()
+    expect(verifier.waitForWindowsUninstallCleanup).toBeTypeOf('function')
+
+    await expect(verifier.waitForWindowsUninstallCleanup?.([shortcut], 20)).rejects.toThrow(
+      `Windows uninstall did not remove: ${shortcut}`,
+    )
   })
 })
 
