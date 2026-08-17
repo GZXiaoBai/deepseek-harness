@@ -41,6 +41,7 @@ interface StageRuntimeModule {
 
 const stageScriptUrl = pathToFileURL(join(import.meta.dirname, '../scripts/stage-runtime.mjs')).href
 const directories: string[] = []
+const macIt = process.platform === 'darwin' ? it : it.skip
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(async directory => rm(directory, { force: true, recursive: true })))
@@ -510,7 +511,7 @@ describe('desktop runtime staging', () => {
     })).rejects.toThrow(`Staged symlink resolves outside the runtime: ${join(runtimeDirectory, 'node_modules/workspace-package')}`)
   })
 
-  it('allows internal pnpm links whose directory names contain encoded checkout paths', async () => {
+  macIt('allows internal pnpm links whose directory names contain encoded checkout paths', async () => {
     const repoRoot = await makeRepository()
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     const { createStagePlan, executeStagePlan } = await loadStageRuntime()

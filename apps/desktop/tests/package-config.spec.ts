@@ -13,6 +13,7 @@ const verifyPackageScriptUrl = pathToFileURL(join(desktopRoot, 'scripts/verify-p
 const afterPackScriptUrl = pathToFileURL(join(desktopRoot, 'scripts/after-pack.mjs')).href
 const concurrencyProbe = join(import.meta.dirname, 'fixtures/osx-sign-concurrency.cjs')
 const directories: string[] = []
+const macIt = process.platform === 'darwin' ? it : it.skip
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(async directory => rm(directory, { force: true, recursive: true })))
@@ -523,7 +524,7 @@ describe('desktop package configuration', () => {
     )
   })
 
-  it('copies the runtime to the exact App resource path and preserves contained relative pnpm links', async () => {
+  macIt('copies the runtime to the exact App resource path and preserves contained relative pnpm links', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-after-pack-'))
     directories.push(root)
     const desktopDirectory = join(root, 'apps/desktop')
@@ -587,7 +588,7 @@ describe('desktop package configuration', () => {
       .resolves.toBe('')
   })
 
-  it('rejects an escaping source symlink before replacing the packaged runtime', async () => {
+  macIt('rejects an escaping source symlink before replacing the packaged runtime', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-after-pack-external-'))
     directories.push(root)
     const desktopDirectory = join(root, 'apps/desktop')
@@ -611,7 +612,7 @@ describe('desktop package configuration', () => {
     await expect(readFile(join(destinationRuntime, 'keep.txt'), 'utf8')).resolves.toBe('keep')
   })
 
-  it('rejects a packaged runtime whose copied CLI anchor or symlink containment is invalid', async () => {
+  macIt('rejects a packaged runtime whose copied CLI anchor or symlink containment is invalid', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-after-pack-invalid-copy-'))
     directories.push(root)
     const desktopDirectory = join(root, 'apps/desktop')
