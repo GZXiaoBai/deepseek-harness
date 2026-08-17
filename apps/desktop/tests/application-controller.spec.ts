@@ -38,19 +38,26 @@ class TestWindow implements DesktopWindow {
   #open: ((url: string) => void) | undefined
   #navigate: ((url: string) => boolean) | undefined
   readonly #loadFileBarrier: Promise<void>
+  readonly #loadUrlBarrier: Promise<void>
+  #closed: (() => void) | undefined
+  #destroyed = false
 
-  constructor(options: DesktopWindowOptions, loadFileBarrier: Promise<void>) {
+  constructor(options: DesktopWindowOptions, loadFileBarrier: Promise<void>, loadUrlBarrier: Promise<void>) {
     this.options = options
     this.#loadFileBarrier = loadFileBarrier
+    this.#loadUrlBarrier = loadUrlBarrier
   }
 
   async loadFile(path: string): Promise<void> {
+    if (this.#destroyed) throw new Error('Object has been destroyed')
     this.loaded.push(path)
     await this.#loadFileBarrier
   }
 
   async loadUrl(url: string): Promise<void> {
     this.loaded.push(url)
+    await this.#loadUrlBarrier
+    if (this.#destroyed) throw new Error('Object has been destroyed')
   }
 
   reload(): void {
@@ -77,7 +84,13 @@ class TestWindow implements DesktopWindow {
     return this.#bounds
   }
 
-  onClosed(_listener: () => void): void {}
+  onClosed(listener: () => void): void {
+    this.#closed = listener
+  }
+
+  isDestroyed(): boolean {
+    return this.#destroyed
+  }
 
   onBoundsChanged(_listener: () => void): void {}
 
@@ -95,6 +108,14 @@ class TestWindow implements DesktopWindow {
 
   emitNavigation(url: string): boolean {
     return this.#navigate?.(url) ?? true
+  }
+
+  destroyBeforeClosedEvent(): void {
+    this.#destroyed = true
+  }
+
+  emitClosed(): void {
+    this.#closed?.()
   }
 }
 
@@ -130,6 +151,7 @@ class TestAdapter implements DesktopAdapter {
   failureActions: StartupFailureAction[] = []
   ready: Promise<void> = Promise.resolve()
   windowLoad: Promise<void> = Promise.resolve()
+  windowUrlLoad: Promise<void> = Promise.resolve()
   #secondInstance: (() => void) | undefined
   #beforeQuit: ((event: ShutdownEvent) => void) | undefined
   #allWindowsClosed: (() => void) | undefined
@@ -149,7 +171,7 @@ class TestAdapter implements DesktopAdapter {
   }
 
   createWindow(options: DesktopWindowOptions): DesktopWindow {
-    this.window = new TestWindow(options, this.windowLoad)
+    this.window = new TestWindow(options, this.windowLoad, this.windowUrlLoad)
     return this.window
   }
 
@@ -450,6 +472,29 @@ describe('desktop application controller', () => {
     ready.resolve(new URL('http://127.0.0.1:43127/'))
     await launching
     expect(adapter.window?.loaded).toEqual([options.startupDocument, 'http://127.0.0.1:43127/'])
+  })
+
+  it('shuts down cleanly when the window is destroyed during confirmed URL loading', async () => {
+    const adapter = new TestAdapter()
+    const urlLoad = Promise.withResolvers<undefined>()
+    adapter.windowUrlLoad = urlLoad.promise
+    const harness = new TestHarness()
+    const options = await createOptions(adapter, harness)
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const launching = launchDesktopApplication(adapter, async () => new ApplicationController(options))
+
+    await expect.poll(() => adapter.window?.loaded).toEqual([
+      options.startupDocument,
+      'http://127.0.0.1:43127/',
+    ])
+    adapter.window?.destroyBeforeClosedEvent()
+    urlLoad.resolve(undefined)
+    await launching
+
+    await expect.poll(() => adapter.quitCount).toBe(1)
+    expect(harness.transitions).toEqual(['start', 'stop'])
+    expect(adapter.exitCodes).toEqual([])
+    expect(diagnostic).not.toHaveBeenCalled()
   })
 
   it.each([
