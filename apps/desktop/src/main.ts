@@ -37,6 +37,7 @@ export interface DesktopWindow {
   reload(): void
   show(): void
   focus(): void
+  isDestroyed(): boolean
   isMinimized(): boolean
   restore(): void
   getBounds(): Required<WindowBounds>
@@ -348,10 +349,20 @@ export class ApplicationController {
     try {
       const url = await this.#harness.start()
       if (this.#shutdown !== undefined) return
+      const window = this.#window
+      if (window === undefined || window.isDestroyed()) {
+        this.#beginShutdown()
+        return
+      }
       this.#harnessOrigin = url.origin
-      await this.#window?.loadUrl(url.href)
+      await window.loadUrl(url.href)
     } catch (error) {
       if (this.#shutdown !== undefined) return
+      const window = this.#window
+      if (window === undefined || window.isDestroyed()) {
+        this.#beginShutdown()
+        return
+      }
       await this.#showFailure(asError(error, 'Harness failed to start'))
     }
   }
@@ -513,6 +524,10 @@ class ElectronDesktopWindow implements DesktopWindow {
 
   focus(): void {
     this.#window.focus()
+  }
+
+  isDestroyed(): boolean {
+    return this.#window.isDestroyed()
   }
 
   isMinimized(): boolean {
