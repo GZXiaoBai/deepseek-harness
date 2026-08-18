@@ -346,9 +346,13 @@ describe('Windows Desktop package verification', () => {
     })
     const koffi = fakeKoffi(enumWindows, posted, callback, unregistered)
 
-    await verifier.closeWin32DialogThread?.(42, async () => koffi)
+    await verifier.closeWin32DialogThread?.(42, async () => koffi, {
+      attempts: 2,
+      delay: async () => undefined,
+    })
 
-    expect(enumWindows).toHaveBeenCalledWith(42, callback, 0)
+    expect(enumWindows).toHaveBeenCalledTimes(2)
+    expect(posted).toHaveBeenCalledTimes(2)
     expect(posted).toHaveBeenCalledWith({ handle: 7 }, 0x10, 0, 0)
     expect(unregistered).toHaveBeenCalledWith(callback)
   })
@@ -372,6 +376,18 @@ describe('Windows Desktop package verification', () => {
     expect(enumWindows).toHaveBeenCalledTimes(2)
     expect(delay).toHaveBeenCalledOnce()
     expect(posted).toHaveBeenCalledWith({ handle: 9 }, 0x10, 0, 0)
+  })
+
+  it('rejects native dialog closure when the worker thread never creates a window', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.closeWin32DialogThread).toBeTypeOf('function')
+    const enumWindows = vi.fn(() => 1)
+    const koffi = fakeKoffi(enumWindows, vi.fn(), { invoke: () => 1 }, vi.fn())
+
+    await expect(verifier.closeWin32DialogThread?.(45, async () => koffi, {
+      attempts: 1,
+      delay: async () => undefined,
+    })).rejects.toThrow('did not create a window for thread 45')
   })
 
   it('runs packaged native dialog closure in a process that releases koffi before cleanup', async () => {

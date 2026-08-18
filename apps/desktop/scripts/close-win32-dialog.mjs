@@ -20,6 +20,7 @@ export async function closeWin32DialogThread(
   const postMessageW = user32.func('__stdcall', 'PostMessageW', 'int', ['void *', 'uint32', 'uintptr', 'intptr'])
   const protoEnumProc = koffi.proto('int __stdcall DshVerifyEnumThreadWndProc(void *hwnd, intptr lparam)')
   let posted = 0
+  let everPosted = false
   const callback = koffi.register((window) => {
     posted += 1
     postMessageW(window, 0x10, 0, 0)
@@ -29,13 +30,15 @@ export async function closeWin32DialogThread(
     for (let attempt = 0; attempt < retry.attempts; attempt += 1) {
       posted = 0
       enumThreadWindows(threadId, callback, 0)
-      if (posted > 0) return
+      if (posted > 0) everPosted = true
       if (attempt + 1 < retry.attempts) await retry.delay()
     }
   } finally {
     koffi.unregister(callback)
   }
-  throw new Error(`Packaged Win32 folder dialog did not create a window for thread ${String(threadId)}`)
+  if (!everPosted) {
+    throw new Error(`Packaged Win32 folder dialog did not create a window for thread ${String(threadId)}`)
+  }
 }
 
 async function main() {
