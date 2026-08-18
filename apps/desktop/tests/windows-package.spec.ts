@@ -46,6 +46,11 @@ interface WindowsPackageVerifier {
     worker: EventEmitter & { kill: () => boolean },
     closeThreadWindows: (threadId: number) => Promise<void>,
   ) => Promise<void>
+  closeWin32DialogThread?: (
+    threadId: number,
+    loadKoffi: () => Promise<unknown>,
+    retry?: { attempts: number; delay: () => Promise<void> },
+  ) => Promise<void>
 }
 
 const verifierUrl = pathToFileURL(join(import.meta.dirname, '../scripts/verify-windows-package.mjs')).href
@@ -323,7 +328,67 @@ describe('Windows Desktop package verification', () => {
 
     await expect(observed).rejects.toThrow('Packaged Win32 dialog worker exited before reporting a terminal result')
   })
+
+  it('closes the packaged dialog through the same Win32 calls as production', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.closeWin32DialogThread).toBeTypeOf('function')
+    const posted = vi.fn()
+    const unregistered = vi.fn()
+    const callback = { invoke: (_window: unknown) => 1 }
+    const enumWindows = vi.fn((_threadId: number, registered: typeof callback) => {
+      registered.invoke({ handle: 7 })
+      return 1
+    })
+    const koffi = fakeKoffi(enumWindows, posted, callback, unregistered)
+
+    await verifier.closeWin32DialogThread?.(42, async () => koffi)
+
+    expect(enumWindows).toHaveBeenCalledWith(42, callback, 0)
+    expect(posted).toHaveBeenCalledWith({ handle: 7 }, 0x10, 0, 0)
+    expect(unregistered).toHaveBeenCalledWith(callback)
+  })
+
+  it('retries native enumeration when the dialog window races its progress notice', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.closeWin32DialogThread).toBeTypeOf('function')
+    const posted = vi.fn()
+    const callback = { invoke: (_window: unknown) => 1 }
+    let enumeration = 0
+    const enumWindows = vi.fn((_threadId: number, registered: typeof callback) => {
+      enumeration += 1
+      if (enumeration === 2) registered.invoke({ handle: 9 })
+      return 1
+    })
+    const koffi = fakeKoffi(enumWindows, posted, callback, vi.fn())
+    const delay = vi.fn(async () => undefined)
+
+    await verifier.closeWin32DialogThread?.(43, async () => koffi, { attempts: 2, delay })
+
+    expect(enumWindows).toHaveBeenCalledTimes(2)
+    expect(delay).toHaveBeenCalledOnce()
+    expect(posted).toHaveBeenCalledWith({ handle: 9 }, 0x10, 0, 0)
+  })
 })
+
+function fakeKoffi(
+  enumWindows: (threadId: number, callback: { invoke: (window: unknown) => number }, lparam: number) => number,
+  postMessage: (...args: unknown[]) => unknown,
+  callback: { invoke: (window: unknown) => number },
+  unregister: (callback: unknown) => unknown,
+): unknown {
+  return {
+    load: () => ({
+      func: (_convention: string, name: string) => name === 'EnumThreadWindows' ? enumWindows : postMessage,
+    }),
+    proto: () => ({ kind: 'prototype' }),
+    pointer: (value: unknown) => value,
+    register: (handler: (window: unknown) => number) => {
+      callback.invoke = handler
+      return callback
+    },
+    unregister,
+  }
+}
 
 async function createWindowsApp(appDirectory: string): Promise<string> {
   const resources = join(appDirectory, 'resources')
