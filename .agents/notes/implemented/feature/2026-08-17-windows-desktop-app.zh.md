@@ -22,7 +22,7 @@ Electron Builder 生成 `win-unpacked` 与 `DeepSeek Harness Setup <version>-x64
 
 ## 验证
 
-行为测试固定了目标解析、Windows 启动参数、`taskkill.exe` 失败语义、提升式暂存、预构建裁剪、PE 解析、afterPack 目标、ICO 生成、NSIS 配置和工作流策略。原生 Windows 验证器会同时检查未打包目录与静默安装的 NSIS 版本，覆盖无链接包含性、x64 应用负载、精确的 NSIS 卸载程序例外、预期 `NotSigned` 状态、仓库外启动、严格回环 HTTP 与页面标题、隔离的 Harness profile 初始化、第二实例后端身份、窗口关闭后的进程树与端口清理、快捷方式位置、卸载清理及 Harness 数据保留。验证器还会记录静默安装耗时，并把安装程序体积、应用文件数与字节总数写入 `apps/desktop/release/verify-stats.json`，作为安装耗时的回归信号。
+行为测试固定了目标解析、Windows 启动参数、`taskkill.exe` 失败语义、提升式暂存、预构建裁剪、PE 解析、afterPack 目标、ICO 生成、NSIS 配置和工作流策略。原生 Windows 验证器会同时检查未打包目录与静默安装的 NSIS 版本，覆盖无链接包含性、x64 应用负载、精确的 NSIS 卸载程序例外、预期 `NotSigned` 状态、自动关闭后报告取消终态的随包原生文件夹弹窗、仓库外启动、严格回环 HTTP 与页面标题、隔离的 Harness profile 初始化、第二实例后端身份、窗口关闭后的进程树与端口清理、快捷方式位置、卸载清理及 Harness 数据保留。验证器还会记录静默安装耗时，并把安装程序体积、应用文件数与字节总数写入 `apps/desktop/release/verify-stats.json`，作为安装耗时的回归信号。
 
 拉取请求与手动 Windows Desktop 工作流会在现有 Windows Server 2025 x64 runner 上运行该验证器，并保留安装程序 14 天。这属于自动 Windows 打包证据，而不是 Windows 11 兼容性证据。首次发布前，必须在真实 Windows 11 x64 电脑上运行同一安装与验收脚本，并单独记录结果。
 

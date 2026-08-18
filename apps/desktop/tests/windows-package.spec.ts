@@ -1,8 +1,9 @@
+import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 interface WindowsVerifyPlan {
   releaseDirectory: string
@@ -41,6 +42,10 @@ interface WindowsPackageVerifier {
     uninstaller: string
   }
   waitForWindowsUninstallCleanup?: (paths: readonly string[], timeoutMs: number) => Promise<void>
+  observeWin32DialogWorker?: (
+    worker: EventEmitter & { kill: () => boolean },
+    closeThreadWindows: (threadId: number) => Promise<void>,
+  ) => Promise<void>
 }
 
 const verifierUrl = pathToFileURL(join(import.meta.dirname, '../scripts/verify-windows-package.mjs')).href
@@ -290,6 +295,33 @@ describe('Windows Desktop package verification', () => {
     await expect(verifier.waitForWindowsUninstallCleanup?.([shortcut], 20)).rejects.toThrow(
       `Windows uninstall did not remove: ${shortcut}`,
     )
+  })
+
+  it('accepts a packaged dialog worker only after its terminal cancel result', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.observeWin32DialogWorker).toBeTypeOf('function')
+    const worker = Object.assign(new EventEmitter(), { kill: vi.fn(() => true) })
+    const closeThreadWindows = vi.fn(async () => undefined)
+
+    const observed = verifier.observeWin32DialogWorker?.(worker, closeThreadWindows)
+    worker.emit('message', { kind: 'showing', threadId: 42 })
+    await vi.waitFor(() => { expect(closeThreadWindows).toHaveBeenCalledWith(42) })
+    worker.emit('message', { kind: 'done', path: null })
+    worker.emit('exit', 0, null)
+
+    await expect(observed).resolves.toBeUndefined()
+    expect(worker.kill).not.toHaveBeenCalled()
+  })
+
+  it('rejects a packaged dialog worker that exits without a terminal result', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.observeWin32DialogWorker).toBeTypeOf('function')
+    const worker = Object.assign(new EventEmitter(), { kill: vi.fn(() => true) })
+
+    const observed = verifier.observeWin32DialogWorker?.(worker, async () => undefined)
+    worker.emit('exit', 0, null)
+
+    await expect(observed).rejects.toThrow('Packaged Win32 dialog worker exited before reporting a terminal result')
   })
 })
 

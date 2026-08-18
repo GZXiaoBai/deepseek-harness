@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { cp, lstat, mkdir, mkdtemp, opendir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -175,6 +176,7 @@ async function verifyStandaloneWindowsLaunch(sourceDirectory) {
     await cp(sourceDirectory, copiedDirectory, { recursive: true, verbatimSymlinks: true })
     const layout = await validateWindowsAppLayout(copiedDirectory)
     await requireUnsigned(layout.executable)
+    await verifyPackagedWin32DialogWorker(layout)
     await verifyWindowsLaunch(layout.executable, userData, temporaryRoot)
   } finally {
     await rm(temporaryRoot, { recursive: true })
@@ -217,6 +219,7 @@ async function verifyInstalledWindowsPackage(installer) {
     })
     await requireUnsigned(layout.executable)
     await requireUnsigned(installedPaths.uninstaller)
+    await verifyPackagedWin32DialogWorker(layout)
     await verifyWindowsLaunch(layout.executable, userData, acceptanceRoot)
 
     await mkdir(paths.userData, { recursive: true })
@@ -288,6 +291,118 @@ async function readWindowsShortcutTarget(shortcut) {
   const target = result.stdout.trim()
   if (target === '') throw new Error(`NSIS Start Menu shortcut has no target: ${shortcut}`)
   return target
+}
+
+/**
+ * Observes one packaged Win32 dialog worker through its progress and terminal messages.
+ *
+ * @param {import('node:child_process').ChildProcess} worker Spawned packaged dialog child.
+ * @param {(threadId: number) => Promise<void>} closeThreadWindows Closes the dialog during acceptance.
+ * @returns {Promise<void>} Resolves only after the auto-close produces a terminal cancellation.
+ */
+export async function observeWin32DialogWorker(worker, closeThreadWindows) {
+  return await new Promise((resolveWorker, rejectWorker) => {
+    let settled = false
+    const settle = (outcome) => {
+      if (settled) return
+      settled = true
+      outcome()
+    }
+    worker.on('message', (message) => {
+      if (message === null || typeof message !== 'object' || typeof message.kind !== 'string') {
+        settle(() => rejectWorker(new Error('Packaged Win32 dialog worker reported an invalid IPC message')))
+        return
+      }
+      if (message.kind === 'showing') {
+        if (!Number.isInteger(message.threadId) || message.threadId < 1) {
+          settle(() => rejectWorker(new Error('Packaged Win32 dialog worker reported an invalid thread id')))
+          return
+        }
+        void closeThreadWindows(message.threadId).catch((error) => {
+          settle(() => rejectWorker(new Error(`Unable to close packaged Win32 folder dialog: ${errorMessage(error)}`)))
+        })
+        return
+      }
+      if (message.kind === 'done') {
+        if (message.path !== null) {
+          settle(() => rejectWorker(new Error('Packaged Win32 dialog worker returned a path during auto-close')))
+          return
+        }
+        settle(resolveWorker)
+        return
+      }
+      if (message.kind === 'error' && typeof message.message === 'string') {
+        settle(() => rejectWorker(new Error(`Packaged Win32 dialog worker failed: ${message.message}`)))
+        return
+      }
+      settle(() => rejectWorker(new Error('Packaged Win32 dialog worker reported an invalid IPC message')))
+    })
+    worker.on('error', (error) => {
+      settle(() => rejectWorker(error))
+    })
+    worker.on('exit', () => {
+      settle(() => rejectWorker(new Error('Packaged Win32 dialog worker exited before reporting a terminal result')))
+    })
+  })
+}
+
+/** @param {{ executable: string, runtime: string }} layout */
+async function verifyPackagedWin32DialogWorker(layout) {
+  const runtimeRequire = createRequire(join(layout.runtime, 'package.json'))
+  const workerPath = runtimeRequire.resolve('@deepseek-ai/dsh-host-directory-picker-native/worker')
+  await requireCanonicalDescendant(await realpath(layout.runtime), workerPath, 'Packaged Win32 dialog worker')
+  const environment = {
+    ...isolatedEnvironment(),
+    DSH_DIALOG_TITLE: 'DeepSeek Harness packaged folder-dialog verification',
+    ELECTRON_RUN_AS_NODE: '1',
+  }
+  const worker = spawn(layout.executable, [workerPath], {
+    cwd: layout.runtime,
+    env: environment,
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    windowsHide: true,
+  })
+  const exit = new Promise((resolveExit) => {
+    worker.once('exit', (code, signal) => resolveExit({ code, signal }))
+  })
+  let stderr = ''
+  worker.stderr?.setEncoding('utf8')
+  worker.stderr?.on('data', chunk => { stderr += chunk })
+  const timeout = setTimeout(() => { worker.kill() }, SHUTDOWN_TIMEOUT_MS)
+  try {
+    await observeWin32DialogWorker(worker, closeWin32DialogThread)
+    const result = await exit
+    if (result.code !== 0 || result.signal !== null) {
+      throw new Error(`Packaged Win32 dialog worker did not exit cleanly (${describeExit(result)}): ${stderr.trim()}`)
+    }
+  } finally {
+    clearTimeout(timeout)
+    if (worker.exitCode === null && worker.signalCode === null) worker.kill()
+  }
+}
+
+/** @param {number} threadId */
+async function closeWin32DialogThread(threadId) {
+  const script = String.raw`
+$source = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+public static class DshDialogCloser {
+  public delegate bool EnumThreadDelegate(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumThreadWindows(uint threadId, EnumThreadDelegate callback, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam);
+  public static void Close(uint threadId) {
+    var callback = new EnumThreadDelegate((hWnd, lParam) => { PostMessage(hWnd, 0x10, UIntPtr.Zero, IntPtr.Zero); return true; });
+    for (var attempt = 0; attempt < 40; attempt++) { EnumThreadWindows(threadId, callback, IntPtr.Zero); Thread.Sleep(50); }
+  }
+}
+'@
+Add-Type -TypeDefinition $source
+[DshDialogCloser]::Close([uint32]$env:DSH_VERIFY_THREAD_ID)
+`
+  await runPowerShell(script, { DSH_VERIFY_THREAD_ID: String(threadId) })
 }
 
 /** @param {string} executable @param {string} userData @param {string} cwd */
