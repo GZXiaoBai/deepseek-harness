@@ -14,7 +14,9 @@ import { auditX64Pe } from './pe-audit.mjs'
 import { requireClosedTcpPort, terminateOwnedProcessGroup, terminateOwnedWindowsProcessTree } from './process-group.mjs'
 import { runRuntimeSmokeProcess } from './runtime-smoke-process.mjs'
 
-const STARTUP_TIMEOUT_MS = 15_000
+// Windows Defender and first-run filesystem warmup can push the first Web
+// startup past the macOS deadline, so the staged runtime smoke gets its own.
+const STARTUP_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 15_000
 const runtimeDirectory = fileURLToPath(new URL('../.runtime/', import.meta.url))
 const require = createRequire(import.meta.url)
 const electronExecutable = require('electron')
