@@ -6,7 +6,12 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as harnessProcessModule from '../src/harness-process.ts'
 import { DesktopLogger } from '../src/desktop-logger.ts'
-import { HarnessProcessController, type HarnessProcessOptions, type HarnessProcessSpawner } from '../src/harness-process.ts'
+import {
+  defaultHarnessStartupTimeout,
+  HarnessProcessController,
+  type HarnessProcessOptions,
+  type HarnessProcessSpawner,
+} from '../src/harness-process.ts'
 
 const fixturePath = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url))
 const userDataDirectories: string[] = []
@@ -91,6 +96,11 @@ describe('HarnessProcessController', () => {
     expect(resolveTarget?.('win32', 'x64')).toEqual({ platform: 'win32', arch: 'x64' })
     expect(() => resolveTarget?.('darwin', 'x64')).toThrow('darwin-x64')
     expect(() => resolveTarget?.('linux', 'x64')).toThrow('linux-x64')
+  })
+
+  it('gives Windows its own longer first-launch backend deadline', () => {
+    expect(defaultHarnessStartupTimeout({ platform: 'darwin', arch: 'arm64' })).toBe(15_000)
+    expect(defaultHarnessStartupTimeout({ platform: 'win32', arch: 'x64' })).toBe(60_000)
   })
 
   it('invokes taskkill shell-free for exactly the owned Windows process tree', async () => {
@@ -199,10 +209,11 @@ describe('HarnessProcessController', () => {
     }
   })
 
-  it('preserves the startup timeout when it aborts a pending health check', async () => {
+  it('gives a pending health check its own deadline after the URL arrives', async () => {
     const healthCheckStarted = Promise.withResolvers<undefined>()
     const { controller } = await createController(['normal'], {
       startupTimeoutMs: 500,
+      healthCheckTimeoutMs: 100,
       healthCheck: async (_url, signal) => {
         healthCheckStarted.resolve(undefined)
         await new Promise<never>((_resolve, reject) => {
@@ -214,7 +225,7 @@ describe('HarnessProcessController', () => {
     })
 
     const starting = controller.start()
-    const expectedTimeout = expect(starting).rejects.toThrow('Harness startup timed out after 500ms')
+    const expectedTimeout = expect(starting).rejects.toThrow('Harness health check timed out after 100ms')
     await healthCheckStarted.promise
     await expectedTimeout
   })

@@ -4,7 +4,22 @@ import { resolveDesktopTarget, type DesktopTarget } from './desktop-target.ts'
 import { parseHarnessUrl } from './harness-url.ts'
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000
+const WINDOWS_DEFAULT_STARTUP_TIMEOUT_MS = 60_000
+const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 10_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
+
+/**
+ * Resolves the default backend startup deadline for one native Desktop target.
+ *
+ * Windows first launches pay Defender and filesystem-warmup costs that can
+ * exceed the macOS deadline before the Web server emits its URL line.
+ *
+ * @param target Native Desktop target being launched.
+ * @returns Default startup timeout in milliseconds.
+ */
+export function defaultHarnessStartupTimeout(target: DesktopTarget): number {
+  return target.platform === 'win32' ? WINDOWS_DEFAULT_STARTUP_TIMEOUT_MS : DEFAULT_STARTUP_TIMEOUT_MS
+}
 
 /** Child-process operation used by the controller's fixed argument form. */
 export type HarnessProcessSpawner = (
@@ -32,6 +47,7 @@ export interface HarnessProcessOptions {
   cwd: string
   env: NodeJS.ProcessEnv
   startupTimeoutMs?: number
+  healthCheckTimeoutMs?: number
   shutdownTimeoutMs?: number
   spawnProcess?: HarnessProcessSpawner
   killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void
@@ -98,7 +114,7 @@ interface RunningHarness {
  * detached child, and does not manage children inherited from another controller.
  */
 export class HarnessProcessController {
-  readonly #options: Required<Pick<HarnessProcessOptions, 'startupTimeoutMs' | 'shutdownTimeoutMs'>> & HarnessProcessOptions
+  readonly #options: Required<Pick<HarnessProcessOptions, 'startupTimeoutMs' | 'healthCheckTimeoutMs' | 'shutdownTimeoutMs'>> & HarnessProcessOptions
   readonly #spawnProcess: HarnessProcessSpawner
   readonly #killProcessGroup: (pid: number, signal: NodeJS.Signals) => void
   readonly #terminateWindowsProcessTree: WindowsProcessTreeTerminator
@@ -115,7 +131,8 @@ export class HarnessProcessController {
   constructor(options: HarnessProcessOptions) {
     this.#options = {
       ...options,
-      startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
+      startupTimeoutMs: options.startupTimeoutMs ?? defaultHarnessStartupTimeout(options.target),
+      healthCheckTimeoutMs: options.healthCheckTimeoutMs ?? DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     }
     this.#spawnProcess = options.spawnProcess ?? spawn
@@ -235,7 +252,14 @@ export class HarnessProcessController {
     const url = parseHarnessUrl(line)
     if (url === undefined) return
 
+    // The startup deadline bounds how long the child may take to emit its URL.
+    // Once the URL exists the health request gets a separate deadline, so a
+    // child that becomes ready just before the startup limit is not aborted.
+    clearTimeout(run.startupTimer)
     run.healthCheckStarted = true
+    run.startupTimer = setTimeout(() => {
+      this.#failStart(run, new Error(`Harness health check timed out after ${this.#options.healthCheckTimeoutMs}ms`))
+    }, this.#options.healthCheckTimeoutMs)
     void this.#checkReadiness(run, url)
   }
 

@@ -12,7 +12,7 @@ import { auditX64Pe } from './pe-audit.mjs'
 import { requireClosedTcpPort, terminateOwnedWindowsProcessTree } from './process-group.mjs'
 
 const PRODUCT_NAME = 'DeepSeek Harness'
-const STARTUP_TIMEOUT_MS = 30_000
+const STARTUP_TIMEOUT_MS = 90_000
 const SHUTDOWN_TIMEOUT_MS = 15_000
 const DESKTOP_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -117,8 +117,8 @@ export function createWindowsInstallPaths(input) {
 }
 
 /**
- * Resolves the actual one-click NSIS directory from its Start Menu target.
- * Electron Builder deliberately uses a sanitized package name for this directory.
+ * Resolves the actual NSIS install directory from its Start Menu target.
+ * The silent acceptance install keeps Electron Builder's per-user default directory.
  *
  * @param {{ programsDirectory: string, shortcutTarget: string }} input Trusted per-user root and shortcut target.
  * @returns {{ installDirectory: string, executable: string, uninstaller: string }} Validated installed paths.
@@ -194,7 +194,7 @@ async function verifyInstalledWindowsPackage(installer) {
     await run(installer, ['/S'], { windowsHide: true })
     installed = true
     await requireOrdinaryFile(paths.startMenuShortcut, 'NSIS did not create the Start Menu shortcut')
-    await requireMissing(paths.desktopShortcut, 'NSIS created the forbidden Desktop shortcut')
+    await requireOrdinaryFile(paths.desktopShortcut, 'NSIS did not create the Desktop shortcut')
     installedPaths = createInstalledWindowsPaths({
       programsDirectory: paths.programsDirectory,
       shortcutTarget: await readWindowsShortcutTarget(paths.startMenuShortcut),

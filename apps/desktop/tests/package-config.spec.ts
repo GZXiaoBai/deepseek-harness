@@ -123,6 +123,7 @@ interface BuilderConfig {
     oneClick?: boolean
     perMachine?: boolean
     allowElevation?: boolean
+    allowToChangeInstallationDirectory?: boolean
     createStartMenuShortcut?: boolean
     createDesktopShortcut?: boolean
     runAfterFinish?: boolean
@@ -192,7 +193,7 @@ describe('desktop package configuration', () => {
     ])
   })
 
-  it('builds an unsigned one-click per-user Windows x64 NSIS installer', async () => {
+  it('builds an unsigned assisted per-user Windows x64 NSIS installer with install directory choice', async () => {
     const config = parse(await readFile(join(desktopRoot, 'electron-builder.yml'), 'utf8')) as BuilderConfig
 
     expect(config).toMatchObject({
@@ -205,11 +206,12 @@ describe('desktop package configuration', () => {
       },
       nsis: {
         artifactName: 'DeepSeek Harness Setup ${version}-${arch}.${ext}',
-        oneClick: true,
+        oneClick: false,
         perMachine: false,
         allowElevation: false,
+        allowToChangeInstallationDirectory: true,
         createStartMenuShortcut: true,
-        createDesktopShortcut: false,
+        createDesktopShortcut: true,
         runAfterFinish: false,
         deleteAppDataOnUninstall: false,
         packElevateHelper: false,
