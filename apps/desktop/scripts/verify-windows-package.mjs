@@ -11,11 +11,15 @@ import {
 } from './stage-runtime.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
 import { requireClosedTcpPort, terminateOwnedWindowsProcessTree } from './process-group.mjs'
+import { closeWin32DialogThread } from './close-win32-dialog.mjs'
+
+export { closeWin32DialogThread } from './close-win32-dialog.mjs'
 
 const PRODUCT_NAME = 'DeepSeek Harness'
 const STARTUP_TIMEOUT_MS = 90_000
 const SHUTDOWN_TIMEOUT_MS = 15_000
 const DESKTOP_ROOT = fileURLToPath(new URL('..', import.meta.url))
+const WIN32_DIALOG_CLOSER = fileURLToPath(new URL('./close-win32-dialog.mjs', import.meta.url))
 
 /**
  * Creates the fixed artifact paths for native Windows x64 package verification.
@@ -350,7 +354,9 @@ export async function observeWin32DialogWorker(worker, closeThreadWindows) {
 async function verifyPackagedWin32DialogWorker(layout) {
   const runtimeRequire = createRequire(join(layout.runtime, 'package.json'))
   const workerPath = runtimeRequire.resolve('@deepseek-ai/dsh-host-directory-picker-native/worker')
+  const koffiEntry = runtimeRequire.resolve('koffi')
   await requireCanonicalDescendant(await realpath(layout.runtime), workerPath, 'Packaged Win32 dialog worker')
+  await requireCanonicalDescendant(await realpath(layout.runtime), koffiEntry, 'Packaged koffi entry')
   const environment = {
     ...isolatedEnvironment(),
     DSH_DIALOG_TITLE: 'DeepSeek Harness packaged folder-dialog verification',
@@ -372,7 +378,7 @@ async function verifyPackagedWin32DialogWorker(layout) {
   const timeout = setTimeout(() => { worker.kill() }, SHUTDOWN_TIMEOUT_MS)
   try {
     await observeWin32DialogWorker(worker, async (threadId) => {
-      await closeWin32DialogThread(threadId, async () => runtimeRequire('koffi'))
+      await runPackagedWin32DialogCloser(threadId, koffiEntry)
     })
     const result = await exit
     if (result.code !== 0 || result.signal !== null) {
@@ -385,39 +391,21 @@ async function verifyPackagedWin32DialogWorker(layout) {
 }
 
 /**
- * Closes the packaged dialog through the same user32 operations as the production driver.
+ * Runs native dialog closure in a short-lived process so Windows releases koffi before artifact cleanup.
  * @param {number} threadId Native worker thread that owns the dialog.
- * @param {() => Promise<any>} loadKoffi Loads koffi from the packaged runtime.
- * @param {{ attempts: number, delay: () => Promise<void> }} [retry] Window-creation race policy.
+ * @param {string} koffiEntry Absolute packaged koffi entry module.
+ * @param {{ executable: string; script: string; run: typeof run }} [internals] Process seams for tests.
  */
-export async function closeWin32DialogThread(
+export async function runPackagedWin32DialogCloser(
   threadId,
-  loadKoffi,
-  retry = { attempts: 40, delay: async () => { await delay(50) } },
+  koffiEntry,
+  internals = { executable: process.execPath, script: WIN32_DIALOG_CLOSER, run },
 ) {
-  const loaded = await loadKoffi()
-  const koffi = loaded.default ?? loaded
-  const user32 = koffi.load('user32.dll')
-  const enumThreadWindows = user32.func('__stdcall', 'EnumThreadWindows', 'int', ['uint32', 'void *', 'intptr'])
-  const postMessageW = user32.func('__stdcall', 'PostMessageW', 'int', ['void *', 'uint32', 'uintptr', 'intptr'])
-  const protoEnumProc = koffi.proto('int __stdcall DshVerifyEnumThreadWndProc(void *hwnd, intptr lparam)')
-  let posted = 0
-  const callback = koffi.register((window) => {
-    posted += 1
-    postMessageW(window, 0x10, 0, 0)
-    return 1
-  }, koffi.pointer(protoEnumProc))
-  try {
-    for (let attempt = 0; attempt < retry.attempts; attempt += 1) {
-      posted = 0
-      enumThreadWindows(threadId, callback, 0)
-      if (posted > 0) return
-      if (attempt + 1 < retry.attempts) await retry.delay()
-    }
-  } finally {
-    koffi.unregister(callback)
-  }
-  throw new Error(`Packaged Win32 folder dialog did not create a window for thread ${String(threadId)}`)
+  await internals.run(
+    internals.executable,
+    [internals.script, koffiEntry, String(threadId)],
+    { windowsHide: true },
+  )
 }
 
 /** @param {string} executable @param {string} userData @param {string} cwd */

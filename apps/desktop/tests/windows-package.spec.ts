@@ -51,6 +51,11 @@ interface WindowsPackageVerifier {
     loadKoffi: () => Promise<unknown>,
     retry?: { attempts: number; delay: () => Promise<void> },
   ) => Promise<void>
+  runPackagedWin32DialogCloser?: (
+    threadId: number,
+    koffiEntry: string,
+    internals: { executable: string; script: string; run: (...args: unknown[]) => Promise<unknown> },
+  ) => Promise<void>
 }
 
 const verifierUrl = pathToFileURL(join(import.meta.dirname, '../scripts/verify-windows-package.mjs')).href
@@ -367,6 +372,24 @@ describe('Windows Desktop package verification', () => {
     expect(enumWindows).toHaveBeenCalledTimes(2)
     expect(delay).toHaveBeenCalledOnce()
     expect(posted).toHaveBeenCalledWith({ handle: 9 }, 0x10, 0, 0)
+  })
+
+  it('runs packaged native dialog closure in a process that releases koffi before cleanup', async () => {
+    const verifier = await loadVerifier()
+    expect(verifier.runPackagedWin32DialogCloser).toBeTypeOf('function')
+    const run = vi.fn(async () => ({ code: 0, signal: null }))
+
+    await verifier.runPackagedWin32DialogCloser?.(44, 'C:\runtime\koffi\index.js', {
+      executable: 'C:\node.exe',
+      script: 'C:\verify\close-win32-dialog.mjs',
+      run,
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      'C:\node.exe',
+      ['C:\verify\close-win32-dialog.mjs', 'C:\runtime\koffi\index.js', '44'],
+      { windowsHide: true },
+    )
   })
 })
 
