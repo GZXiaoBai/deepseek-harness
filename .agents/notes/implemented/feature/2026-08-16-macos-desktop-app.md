@@ -22,7 +22,7 @@ The renderer has context isolation and sandboxing enabled, with Node integration
 
 The Desktop app owns only the detached process group it creates. Quit, retry, application signals, and unexpected exits share one shutdown barrier: the owned group receives `SIGTERM`, gets five seconds to exit, then receives `SIGKILL` if necessary. The application neither discovers nor signals unrelated Harness processes.
 
-The packaged backend uses the private, verified dependency deployment described by the [closed-runtime decision](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.md). Packaging is fixed to `darwin-arm64`, rejects every other host target, audits all Mach-O files as arm64, and copies the contained runtime into the App before signing. Every shipped code object is ad-hoc signed with Hardened Runtime; native modules receive only the reviewed JIT, unsigned-executable-memory, and library-validation entitlements. The personal build is not notarized and has no updater.
+The packaged backend uses the private, verified dependency deployment described by the [closed-runtime decision](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.md). Packaging is fixed to `darwin-arm64`, rejects every other host target, audits all Mach-O files as arm64, prunes sources and source maps from the staged runtime, and copies the contained runtime into the App before signing. Every shipped code object is ad-hoc signed with Hardened Runtime; native modules receive only the reviewed JIT, unsigned-executable-memory, and library-validation entitlements. The personal build is not notarized and has no updater.
 
 ## Data and lifecycle boundaries
 

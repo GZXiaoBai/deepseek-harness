@@ -35,6 +35,7 @@ interface StageRuntimeModule {
     runtimeDirectory: string,
     target: Readonly<{ platform: 'darwin'; arch: 'arm64' } | { platform: 'win32'; arch: 'x64' }>,
   ) => Promise<void>
+  pruneRuntimeSources: (runtimeDirectory: string) => Promise<number>
   assertRuntimeContainsNoLinks: (runtimeDirectory: string) => Promise<void>
   auditX64Pe: (runtimeDirectory: string) => Promise<readonly string[]>
 }
@@ -604,5 +605,39 @@ describe('desktop runtime staging', () => {
       },
     })).rejects.toThrow('Staged symlink resolves outside the runtime')
     expect(repairExecuted).toBe(false)
+  })
+
+  it('prunes sources, source maps, and rebuild debris while keeping runtime files', async () => {
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), 'dsh-stage-prune-'))
+    directories.push(runtimeDirectory)
+    const kept = [
+      'node_modules/@deepseek-ai/dsh/lib/bin.js',
+      'node_modules/@deepseek-ai/dsh/lib/index.mjs',
+      'node_modules/dep/index.cjs',
+      'node_modules/dep/prebuilds/darwin-arm64/pty.node',
+    ]
+    const pruned = [
+      'node_modules/@deepseek-ai/dsh/src/index.ts',
+      'node_modules/@deepseek-ai/dsh/lib/index.mts',
+      'node_modules/dep/lib/legacy.cts',
+      'node_modules/dep/lib/index.d.ts',
+      'node_modules/dep/lib/index.js.map',
+      'node_modules/dep/build/Release/obj.target/pty.o',
+      'node_modules/dep/build/Release/pty.obj',
+    ]
+    for (const relative of [...kept, ...pruned]) {
+      const target = join(runtimeDirectory, relative)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, '')
+    }
+    const { pruneRuntimeSources } = await loadStageRuntime()
+
+    await expect(pruneRuntimeSources(runtimeDirectory)).resolves.toBe(pruned.length)
+    for (const relative of kept) {
+      await expect(readFile(join(runtimeDirectory, relative), 'utf8')).resolves.toBe('')
+    }
+    for (const relative of pruned) {
+      await expect(readFile(join(runtimeDirectory, relative), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    }
   })
 })

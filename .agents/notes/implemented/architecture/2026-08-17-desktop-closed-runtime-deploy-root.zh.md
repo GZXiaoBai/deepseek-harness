@@ -16,7 +16,7 @@ Web 组合会挂载 Cordis HMR。HMR 在 Electron 的内嵌 Node 运行时中需
 
 `apps/desktop/runtime/package.json` 是两个受支持 Desktop 目标共用的私有纯依赖工作区和部署根。它依赖 `@deepseek-ai/dsh`，并直接提供 CLI 与 Web 依赖图中可达的每个非可选工作区 peer。`scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json` 遍历应用、包和 vendor 清单，拒绝任何缺失的必需 peer；Desktop 构建与暂存都会执行该检查。
 
-暂存使用冻结锁文件和注入式工作区包部署 `@deepseek-ai/dsh-desktop-runtime`，并禁用依赖生命周期脚本。macOS 保留已包含的 pnpm 链接；Windows 使用提升式 linker，并拒绝每个符号链接、junction 或其他 reparse point。在执行已暂存代码前，暂存会要求 `@deepseek-ai/dsh-subprocess-local` 权限修复是运行时内部的常规文件而不是链接。它只执行该修复，针对原生平台与架构运行 Electron rebuild，裁剪不受支持的 `node-pty` 预构建，并在已暂存内容发生变更后重复执行平台包含性审计。CLI 和前端路径通过以已部署运行时为根的包关系解析。
+暂存使用冻结锁文件和注入式工作区包部署 `@deepseek-ai/dsh-desktop-runtime`，并禁用依赖生命周期脚本。macOS 保留已包含的 pnpm 链接；Windows 使用提升式 linker，并拒绝每个符号链接、junction 或其他 reparse point。在执行已暂存代码前，暂存会要求 `@deepseek-ai/dsh-subprocess-local` 权限修复是运行时内部的常规文件而不是链接。它只执行该修复，针对原生平台与架构运行 Electron rebuild，裁剪不受支持的 `node-pty` 预构建，并在已暂存内容发生变更后重复执行平台包含性审计。重建后，暂存还会剔除 TypeScript 源码、source map 与目标文件（`*.ts`、`*.mts`、`*.cts`、`*.map`、`*.o`、`*.obj`）：运行时清单扫描显示没有任何 `main`/`exports` 运行时条件指向 `.ts`，source map 仅供调试使用，因此这些文件占据了暂存数量的大部分却没有运行时作用。已暂存运行时必须保留在真实文件系统路径上，因为 profile 启动通过真实目录的符号链接（`$DSH_HOME/profiles/node_modules`）解析内置插件，而 Node 的模块解析在 Electron 的 Node 模式下无法跟随指向 `app.asar` 归档内部的链接。CLI 和前端路径通过以已部署运行时为根的包关系解析。
 
 只有在 `ELECTRON_RUN_AS_NODE=1` 时，Desktop Harness 后端子进程才会收到 `--expose-internals`。普通 Node 启动不会收到该参数。Electron 主进程参数和渲染器偏好保持不变；渲染器继续启用上下文隔离与沙箱，并禁用 Node 集成。
 

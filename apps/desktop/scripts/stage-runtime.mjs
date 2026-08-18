@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { lstat, opendir, realpath, rm, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { auditArm64MachO } from './macho-audit.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
@@ -121,12 +121,42 @@ export async function executeStagePlan(plan, options = {}) {
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
   await runCommand(plan.rebuildCommand)
+  await pruneRuntimeSources(plan.runtimeDirectory)
   await resolveCliEntryPath(plan.runtimeDirectory)
   await resolveWebFrontendIndex(plan.runtimeDirectory)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
   const auditRuntime = options.auditRuntime ?? (plan.target.platform === 'win32' ? auditX64Pe : auditArm64MachO)
   await auditRuntime(plan.runtimeDirectory)
+}
+
+/** Extensions that exist only for development, debugging, or rebuild debris. */
+const RUNTIME_SOURCE_EXTENSIONS = new Set(['.cts', '.d.ts', '.map', '.mts', '.o', '.obj', '.ts'])
+
+/**
+ * Removes source, source-map, and rebuild-debris files from the staged runtime.
+ *
+ * The staged closure ships every published package file, and TypeScript
+ * sources plus source maps make up most of the 30k+ staged files without any
+ * runtime role. Node never resolves them: the runtime manifest scan shows no
+ * `main`/`exports` runtime condition pointing at `.ts`, and source maps are
+ * debugger-only. Pruning after the Electron rebuild keeps the rebuild's
+ * object files out of the shipped runtime, shrinking the installer payload
+ * and the per-file antivirus cost of installation.
+ *
+ * @param {string} runtimeDirectory Deployed Desktop runtime package root.
+ * @returns {Promise<number>} Number of pruned files.
+ */
+export async function pruneRuntimeSources(runtimeDirectory) {
+  let pruned = 0
+  for await (const path of walk(runtimeDirectory)) {
+    const entry = await lstat(path)
+    if (!entry.isSymbolicLink() && entry.isFile() && RUNTIME_SOURCE_EXTENSIONS.has(extname(path))) {
+      await unlink(path)
+      pruned += 1
+    }
+  }
+  return pruned
 }
 
 /**

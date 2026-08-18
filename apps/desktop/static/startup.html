@@ -11,12 +11,25 @@
       main { text-align: center; }
       h1 { font-size: 1.25rem; font-weight: 600; }
       p { color: #808080; }
+      p + p { font-size: 0.875rem; }
+      .dot {
+        animation: pulse 1.4s ease-in-out infinite;
+        background: #808080;
+        border-radius: 50%;
+        display: inline-block;
+        height: 0.5rem;
+        margin-right: 0.4rem;
+        vertical-align: middle;
+        width: 0.5rem;
+      }
+      @keyframes pulse { 50% { opacity: 0.25; } }
     </style>
   </head>
   <body>
     <main>
       <h1>DeepSeek Harness</h1>
-      <p>Starting your local workspace…</p>
+      <p><span class="dot" aria-hidden="true"></span>Starting your local workspace…</p>
+      <p>The first launch prepares the environment and can take a minute.</p>
     </main>
   </body>
 </html>

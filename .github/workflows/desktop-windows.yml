@@ -77,6 +77,10 @@ jobs:
           DSH_POWERSHELL_EXECUTABLE: pwsh.exe
         run: pnpm --filter @deepseek-ai/dsh-desktop run verify:package
 
+      - name: Report package size and install duration
+        shell: pwsh
+        run: Get-Content apps/desktop/release/verify-stats.json
+
       - name: Upload unsigned personal installer
         uses: actions/upload-artifact@v4
         with:

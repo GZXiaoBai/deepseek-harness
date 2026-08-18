@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, opendir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -155,8 +155,13 @@ export async function verifyWindowsPackage() {
   const unpacked = await validateWindowsAppLayout(plan.unpackedDirectory)
   await requireUnsigned(unpacked.executable)
   await requireUnsigned(installer)
+  const unpackedStats = await summarizeTree(plan.unpackedDirectory)
+  const installerBytes = (await stat(installer)).size
   await verifyStandaloneWindowsLaunch(plan.unpackedDirectory)
-  await verifyInstalledWindowsPackage(installer)
+  const installMs = await verifyInstalledWindowsPackage(installer)
+  const stats = { installerBytes, appFiles: unpackedStats.files, appBytes: unpackedStats.bytes, installMs }
+  await writeFile(join(plan.releaseDirectory, 'verify-stats.json'), `${JSON.stringify(stats)}\n`)
+  console.log(`Windows package stats: ${JSON.stringify(stats)}`)
   console.log(`Windows unpacked package verification passed: ${plan.unpackedDirectory}`)
   console.log(`Windows NSIS verification passed: ${installer}`)
 }
@@ -176,7 +181,12 @@ async function verifyStandaloneWindowsLaunch(sourceDirectory) {
   }
 }
 
-/** @param {string} installer */
+/**
+ * Runs the silent per-user NSIS acceptance and returns the install duration.
+ *
+ * @param {string} installer NSIS installer path.
+ * @returns {Promise<number>} Silent install duration in milliseconds.
+ */
 async function verifyInstalledWindowsPackage(installer) {
   const localAppData = requiredEnvironment('LOCALAPPDATA')
   const appData = requiredEnvironment('APPDATA')
@@ -191,7 +201,9 @@ async function verifyInstalledWindowsPackage(installer) {
   let installedPaths
   try {
     await requireMissing(paths.startMenuShortcut, 'Refusing to replace a pre-existing per-user installation')
+    const installStarted = Date.now()
     await run(installer, ['/S'], { windowsHide: true })
+    const installMs = Date.now() - installStarted
     installed = true
     await requireOrdinaryFile(paths.startMenuShortcut, 'NSIS did not create the Start Menu shortcut')
     await requireOrdinaryFile(paths.desktopShortcut, 'NSIS did not create the Desktop shortcut')
@@ -217,6 +229,7 @@ async function verifyInstalledWindowsPackage(installer) {
       paths.desktopShortcut,
     ], SHUTDOWN_TIMEOUT_MS)
     await requireOrdinaryFile(preservationMarker, 'NSIS uninstall removed preserved application data')
+    return installMs
   } finally {
     if (installed && installedPaths !== undefined) {
       try {
@@ -231,6 +244,38 @@ async function verifyInstalledWindowsPackage(installer) {
       if (error.code !== 'ENOENT') throw error
     }
     await rm(acceptanceRoot, { recursive: true })
+  }
+}
+
+/**
+ * Counts regular files and their total bytes in one directory tree.
+ *
+ * @param {string} directory Tree root.
+ * @returns {Promise<{ files: number, bytes: number }>} File count and byte total.
+ */
+export async function summarizeTree(directory) {
+  let files = 0
+  let bytes = 0
+  for await (const path of walkRegularFiles(directory)) {
+    const entry = await lstat(path)
+    if (!entry.isSymbolicLink()) {
+      files += 1
+      bytes += entry.size
+    }
+  }
+  return { files, bytes }
+}
+
+/** @param {string} directory */
+async function* walkRegularFiles(directory) {
+  const entries = await opendir(directory)
+  for await (const entry of entries) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      yield* walkRegularFiles(path)
+    } else {
+      yield path
+    }
   }
 }
 
