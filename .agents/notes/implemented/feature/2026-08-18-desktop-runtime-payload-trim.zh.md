@@ -10,7 +10,7 @@ Desktop 安装程序把已暂存运行时写成数万个小文件（0.1.0-rc.5 �
 
 ## 决策
 
-暂存在 Electron rebuild 之后从运行时中剔除仅用于开发的文件：TypeScript 源码、source map 与目标文件（`*.ts`、`*.mts`、`*.cts`、`*.map`、`*.o`、`*.obj`）。对已暂存闭包的清单扫描显示，没有任何 `main`/`exports` 运行时条件指向 `.ts`，source map 仅供调试使用，因此这些扩展名没有运行时作用；已暂存冒烟（原生模块、CLI 版本、Web 启动）与打包后的启动验收都在剔除之后运行，错误的裁剪会被当场发现。剔除量约为已暂存树的一半，同时缩小了两个平台的安装包体积与安装时的逐文件杀毒成本。
+暂存在 Electron rebuild 之后从运行时中剔除仅用于开发的文件：TypeScript 源码、source map 与目标文件（`*.ts`、`*.mts`、`*.cts`、`*.map`、`*.o`、`*.obj`）。对已暂存闭包的清单扫描显示，没有任何 `main`/`exports` 运行时条件指向 `.ts`，source map 仅供调试使用，因此这些扩展名没有运行时作用；已暂存冒烟（原生模块、CLI 版本、Web 启动）与打包后的启动验收都在剔除之后运行，错误的裁剪会被当场发现。随后的暂存门禁会拒绝任何把 Node 实际求值的入口（`main`、`bin`，或 `exports` 的 `node`/`import`/`require`/`default` 条件）指向已剪除源码文件的清单，因此未来的依赖不可能把可加载入口路由到被剪除的扩展名；打包器专用条件（`source`、`development`、`browser`）与 `types` 不在检查范围内。剔除量约为已暂存树的一半，同时缩小了两个平台的安装包体积与安装时的逐文件杀毒成本。
 
 Windows 验证器会记录静默 NSIS 安装耗时，并把安装程序体积、应用文件数与字节总数写入 `apps/desktop/release/verify-stats.json`；Windows CI 工作流打印该文件，让安装耗时成为可度量的回归信号而不是传闻。
 

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-18-desktop-runtime-payload-trim.md
-2026-08-18-desktop-runtime-payload-trim.md: 9f364e4e97b6cd113639aca6f0a211fc5f7d23ac
-2026-08-18-desktop-runtime-payload-trim.zh.md: 4fe88508f22ca58e30bd1afb70bc3485b1fef70e
+2026-08-18-desktop-runtime-payload-trim.md: 13415f4c992ee7d4d01c903e3922e9493bf643c3
+2026-08-18-desktop-runtime-payload-trim.zh.md: fc800c937804a8814f201edae48ace04c342762b

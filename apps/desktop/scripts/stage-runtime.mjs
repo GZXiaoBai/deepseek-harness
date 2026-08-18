@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { lstat, opendir, realpath, rm, stat, unlink } from 'node:fs/promises'
+import { lstat, opendir, readFile, realpath, rm, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { auditArm64MachO } from './macho-audit.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
@@ -122,6 +122,7 @@ export async function executeStagePlan(plan, options = {}) {
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
   await runCommand(plan.rebuildCommand)
   await pruneRuntimeSources(plan.runtimeDirectory)
+  await assertRuntimeNoPrunedEntries(plan.runtimeDirectory)
   await resolveCliEntryPath(plan.runtimeDirectory)
   await resolveWebFrontendIndex(plan.runtimeDirectory)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
@@ -132,6 +133,9 @@ export async function executeStagePlan(plan, options = {}) {
 
 /** Extensions that exist only for development, debugging, or rebuild debris. */
 const RUNTIME_SOURCE_EXTENSIONS = new Set(['.cts', '.d.ts', '.map', '.mts', '.o', '.obj', '.ts'])
+
+/** Loadable entry extensions that pruning removes; `.map`/`.o`/`.obj` are never loadable. */
+const RUNTIME_ENTRY_SOURCE_EXTENSIONS = new Set(['.cts', '.mts', '.ts'])
 
 /**
  * Removes source, source-map, and rebuild-debris files from the staged runtime.
@@ -157,6 +161,91 @@ export async function pruneRuntimeSources(runtimeDirectory) {
     }
   }
   return pruned
+}
+
+/** Entry fields Node can load at runtime; `module` and `types` are bundler/compile-time only. */
+const RUNTIME_ENTRY_FIELDS = ['bin', 'main', 'exports']
+
+/** Export conditions Node's resolver actually evaluates. */
+const RUNTIME_EXPORT_CONDITIONS = new Set(['default', 'import', 'node', 'require'])
+
+/**
+ * Rejects a package manifest whose runtime entry points at a pruned source file.
+ *
+ * Pruning removes `.ts`/`.mts`/`.cts` sources, so a future dependency that
+ * routes a loadable entry (`main`, `module`, `bin`, or any `exports` condition
+ * other than `types`) to such a file would fail when the plugin loads, not
+ * when the tree is staged. This check scans every manifest after pruning and
+ * fails the staging build with the offending package and entry, keeping the
+ * prune set provably safe instead of depending on smoke coverage alone.
+ *
+ * @param {string} runtimeDirectory Deployed Desktop runtime package root.
+ * @returns {Promise<void>} Resolves when no runtime entry names a pruned source file.
+ */
+export async function assertRuntimeNoPrunedEntries(runtimeDirectory) {
+  for await (const path of walk(runtimeDirectory)) {
+    if (basename(path) !== 'package.json' || !(await stat(path)).isFile()) continue
+    const manifest = JSON.parse(await readFile(path, 'utf8'))
+    const violations = []
+    for (const field of RUNTIME_ENTRY_FIELDS) {
+      if (field === 'exports') {
+        collectRuntimeExportValues(manifest.exports, violations)
+      } else {
+        collectRuntimeFieldValues(manifest[field], violations)
+      }
+    }
+    if (violations.length > 0) {
+      const listed = violations.map(value => `entry ${value}`).join('; ')
+      throw new Error(`Staged runtime entry points at a pruned source file: ${path} (${listed})`)
+    }
+  }
+}
+
+/**
+ * Collects loadable values from a non-exports entry field (`main`, `bin`).
+ *
+ * @param {unknown} value Manifest field value.
+ * @param {string[]} violations Output array of offending entry values.
+ */
+function collectRuntimeFieldValues(value, violations) {
+  if (typeof value === 'string') {
+    if (RUNTIME_ENTRY_SOURCE_EXTENSIONS.has(extname(value))) violations.push(value)
+    return
+  }
+  if (value === null || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    for (const item of value) collectRuntimeFieldValues(item, violations)
+    return
+  }
+  for (const entry of Object.values(value)) collectRuntimeFieldValues(entry, violations)
+}
+
+/**
+ * Collects loadable values from an `exports` map, following only subpaths and
+ * conditions Node's resolver evaluates. Bundler-only conditions (`source`,
+ * `development`, `browser`, ...) and `types` never load at runtime.
+ *
+ * @param {unknown} value `exports` value.
+ * @param {string[]} violations Output array of offending entry values.
+ */
+function collectRuntimeExportValues(value, violations) {
+  if (typeof value === 'string') {
+    if (RUNTIME_ENTRY_SOURCE_EXTENSIONS.has(extname(value))) violations.push(value)
+    return
+  }
+  if (value === null || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    for (const item of value) collectRuntimeExportValues(item, violations)
+    return
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (key.startsWith('.')) {
+      // Subpath entry (".", "./stream", ...): its value is a conditions map.
+      collectRuntimeExportValues(entry, violations)
+    } else if (RUNTIME_EXPORT_CONDITIONS.has(key)) {
+      collectRuntimeExportValues(entry, violations)
+    }
+  }
 }
 
 /**

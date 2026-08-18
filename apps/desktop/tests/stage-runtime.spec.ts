@@ -36,6 +36,7 @@ interface StageRuntimeModule {
     target: Readonly<{ platform: 'darwin'; arch: 'arm64' } | { platform: 'win32'; arch: 'x64' }>,
   ) => Promise<void>
   pruneRuntimeSources: (runtimeDirectory: string) => Promise<number>
+  assertRuntimeNoPrunedEntries: (runtimeDirectory: string) => Promise<void>
   assertRuntimeContainsNoLinks: (runtimeDirectory: string) => Promise<void>
   auditX64Pe: (runtimeDirectory: string) => Promise<readonly string[]>
 }
@@ -639,5 +640,49 @@ describe('desktop runtime staging', () => {
     for (const relative of pruned) {
       await expect(readFile(join(runtimeDirectory, relative), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     }
+  })
+
+  it('rejects a manifest whose runtime entry points at a pruned source file', async () => {
+    const runtimeDirectory = await mkdtemp(join(tmpdir(), 'dsh-stage-prune-entry-'))
+    directories.push(runtimeDirectory)
+    const { assertRuntimeNoPrunedEntries } = await loadStageRuntime()
+
+    const clean = join(runtimeDirectory, 'node_modules/clean')
+    await mkdir(clean, { recursive: true })
+    await writeFile(join(clean, 'package.json'), JSON.stringify({
+      name: 'clean',
+      main: './lib/index.js',
+      exports: {
+        '.': {
+          source: './src/index.ts',
+          types: './lib/index.d.ts',
+          import: './dist/index.js',
+          default: './dist/index.js',
+        },
+        './sub': { types: './src/sub.d.ts', import: './dist/sub.mjs' },
+      },
+    }))
+    await expect(assertRuntimeNoPrunedEntries(runtimeDirectory)).resolves.toBeUndefined()
+
+    const broken = join(runtimeDirectory, 'node_modules/broken')
+    await mkdir(broken, { recursive: true })
+    await writeFile(join(broken, 'package.json'), JSON.stringify({
+      name: 'broken',
+      exports: { '.': { import: './src/index.ts', default: './lib/index.js' } },
+    }))
+    await expect(assertRuntimeNoPrunedEntries(runtimeDirectory)).rejects.toThrow(
+      `Staged runtime entry points at a pruned source file: ${join(broken, 'package.json')} (entry ./src/index.ts)`,
+    )
+    await rm(broken, { recursive: true })
+
+    const binBroken = join(runtimeDirectory, 'node_modules/bin-broken')
+    await mkdir(binBroken, { recursive: true })
+    await writeFile(join(binBroken, 'package.json'), JSON.stringify({
+      name: 'bin-broken',
+      bin: { run: './src/cli.mts' },
+    }))
+    await expect(assertRuntimeNoPrunedEntries(runtimeDirectory)).rejects.toThrow(
+      `Staged runtime entry points at a pruned source file: ${join(binBroken, 'package.json')} (entry ./src/cli.mts)`,
+    )
   })
 })
