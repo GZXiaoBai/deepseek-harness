@@ -73,4 +73,30 @@ describe('Windows Desktop workflow', () => {
     expect(provisionScript).toContain('path.txt')
     expect(provisionScript).not.toMatch(/Invoke-WebRequest|curl\.exe/)
   })
+
+  it('publishes platform artifacts with checksums from desktop-v tags on both native runners', async () => {
+    const workflowPath = join(import.meta.dirname, '../../../.github/workflows/desktop-release.yml')
+    const workflow = parse(await readFile(workflowPath, 'utf8')) as {
+      on?: { push?: { tags?: string[] } }
+      permissions?: { contents?: string }
+      jobs?: Record<string, WorkflowStep & { 'runs-on'?: unknown; steps?: WorkflowStep[] }>
+    }
+
+    expect(workflow.on?.push?.tags).toEqual(['desktop-v*'])
+    expect(workflow.permissions).toEqual({ contents: 'write' })
+    const windowsJob = workflow.jobs?.['windows']
+    const macosJob = workflow.jobs?.['macos']
+    expect(String(windowsJob?.['runs-on'])).toContain('windows-2025')
+    expect(String(macosJob?.['runs-on'])).toContain('macos-15')
+    for (const job of [windowsJob, macosJob]) {
+      expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run package:desktop')
+      expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm --filter @deepseek-ai/dsh-desktop run verify:package')
+    }
+    const publish = workflow.jobs?.['windows']?.steps?.find(step => step.name === 'Publish installer to the release')
+    expect(publish?.run).toContain('Get-FileHash -Algorithm SHA256')
+    expect(publish?.run).toContain('gh release upload')
+    const macPublish = workflow.jobs?.['macos']?.steps?.find(step => step.name === 'Publish DMG to the release')
+    expect(macPublish?.run).toContain('shasum -a 256')
+    expect(macPublish?.run).toContain('gh release upload')
+  })
 })

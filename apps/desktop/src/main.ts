@@ -1,5 +1,7 @@
-import { realpath, stat } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
+import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
 import { DesktopLogger } from './desktop-logger.ts'
@@ -9,10 +11,20 @@ import { buildChildEnvironment } from './login-path.ts'
 import { createApplicationMenu, type ApplicationMenu, type ApplicationMenuItem } from './menu.ts'
 import { classifyNavigation } from './navigation-policy.ts'
 import { loadWindowBounds, saveWindowBounds, type DisplayBounds, type WindowBounds } from './window-state.ts'
+import { DesktopUpdater } from './updater.ts'
+import {
+  DEFAULT_DESKTOP_SETTINGS,
+  loadDesktopSettings,
+  saveDesktopSettings,
+  type DesktopSettings,
+} from './desktop-settings.ts'
 
 const WINDOW_STATE_FILE = 'window-state.json'
+const SETTINGS_FILE = 'desktop-settings.json'
 const LOG_DIRECTORY = 'Logs'
 const HARNESS_DATA_DIRECTORY = 'Harness'
+/** Startup update check delay: window and backend settle before network work. */
+const AUTOMATIC_UPDATE_DELAY_MS = 30_000
 
 /** Browser security settings required for the Harness web renderer. */
 export interface DesktopWebPreferences {
@@ -105,6 +117,10 @@ export interface ApplicationControllerOptions {
   startupDocument: string
   errorDocument: string
   userDataPath: string
+  /** Update service; absent in unpackaged development runs. */
+  updater?: DesktopUpdater
+  /** Download directory for update artifacts. */
+  updateDownloadDirectory?: string
 }
 
 export type { ApplicationMenu, ApplicationMenuItem }
@@ -221,6 +237,10 @@ export class ApplicationController {
   readonly #errorDocument: string
   readonly #logsDirectory: string
   readonly #windowStatePath: string
+  readonly #settingsPath: string
+  readonly #updater: DesktopUpdater | undefined
+  readonly #updateDownloadDirectory: string
+  #settings: DesktopSettings = structuredClone(DEFAULT_DESKTOP_SETTINGS)
   #window: DesktopWindow | undefined
   #harnessOrigin: string | undefined
   #shutdown: Promise<void> | undefined
@@ -231,7 +251,7 @@ export class ApplicationController {
   /**
    * Creates desktop orchestration around injected Electron and Harness operations.
    *
-   * @param options Adapter, process controller, documents, and user-data root.
+   * @param options Adapter, process controller, documents, user-data root, and updater.
    */
   constructor(options: ApplicationControllerOptions) {
     this.#adapter = options.adapter
@@ -240,6 +260,9 @@ export class ApplicationController {
     this.#errorDocument = options.errorDocument
     this.#logsDirectory = join(options.userDataPath, LOG_DIRECTORY)
     this.#windowStatePath = join(options.userDataPath, WINDOW_STATE_FILE)
+    this.#settingsPath = join(options.userDataPath, SETTINGS_FILE)
+    this.#updater = options.updater
+    this.#updateDownloadDirectory = options.updateDownloadDirectory ?? join(tmpdir(), 'dsh-desktop-updates')
   }
 
   /**
@@ -251,6 +274,7 @@ export class ApplicationController {
     if (this.#started) throw new Error('Desktop application has already started')
     this.#started = true
     this.#installLifecycleHandlers()
+    this.#settings = await loadDesktopSettings(this.#settingsPath)
     this.#installMenu()
 
     await this.#adapter.whenReady()
@@ -273,6 +297,7 @@ export class ApplicationController {
     window.show()
     if (this.#focusPending) this.#focusWindow()
     await this.#startHarnessWithRecovery()
+    this.#scheduleAutomaticUpdateCheck()
   }
 
   /**
@@ -325,7 +350,40 @@ export class ApplicationController {
       quit: () => {
         this.#beginShutdown()
       },
+      checkForUpdates: () => {
+        void this.#runManualUpdateCheck().catch(() => {
+          // Update errors surface through the updater dialogs; nothing to add.
+        })
+      },
+      setAutomaticUpdates: (enabled) => {
+        this.#settings = { ...this.#settings, updater: { ...this.#settings.updater, autoUpdate: enabled } }
+        void saveDesktopSettings(this.#settingsPath, this.#settings).catch(() => {
+          // A failed persist keeps the in-memory toggle for this run.
+        })
+        this.#installMenu()
+      },
+      automaticUpdatesEnabled: this.#updater !== undefined && this.#settings.updater.autoUpdate,
     }))
+  }
+
+  /** Delays the startup update check until the window and backend are stable. */
+  #scheduleAutomaticUpdateCheck(): void {
+    if (this.#updater === undefined || !this.#settings.updater.autoUpdate) return
+    setTimeout(() => {
+      void this.#runManualUpdateCheck().catch(() => {
+        // A background check failure must never surface beyond its own dialogs.
+      })
+    }, AUTOMATIC_UPDATE_DELAY_MS)
+  }
+
+  /** Runs a check; the updater presents the outcome and offers installation. */
+  async #runManualUpdateCheck(): Promise<void> {
+    const updater = this.#updater
+    if (updater === undefined) return
+    const result = await updater.manualCheck()
+    if (result.kind !== 'available') return
+    await mkdir(this.#updateDownloadDirectory, { recursive: true })
+    await updater.install(result.update, this.#updateDownloadDirectory)
   }
 
   #installWindowHandlers(window: DesktopWindow): void {
@@ -693,6 +751,8 @@ function toElectronMenuItem(item: ApplicationMenuItem): MenuItemConstructorOptio
   if (item.type === 'separator') return { type: 'separator' }
   const electronItem: MenuItemConstructorOptions = {}
   if (item.label !== undefined) electronItem.label = item.label
+  if (item.type === 'checkbox') electronItem.type = 'checkbox'
+  if (item.checked !== undefined) electronItem.checked = item.checked
   if (item.role !== undefined) electronItem.role = item.role
   if (item.accelerator !== undefined) electronItem.accelerator = item.accelerator
   if (item.action !== undefined) electronItem.click = item.action
@@ -721,12 +781,69 @@ async function runElectronMain(): Promise<void> {
       env: environment,
       logger,
     })
+    const updater = electron.app.isPackaged
+      ? new DesktopUpdater({
+        currentVersion: electron.app.getVersion(),
+        platform: process.platform,
+        preferences: DEFAULT_DESKTOP_SETTINGS.updater,
+        ops: {
+          fetchJson: async url => await (await fetch(url)).json() as unknown,
+          fetchText: async url => await (await fetch(url)).text(),
+          download: async (url, destination) => {
+            const response = await fetch(url)
+            if (!response.ok) throw new Error(`Update download failed with HTTP ${String(response.status)}`)
+            await writeFile(destination, Buffer.from(await response.arrayBuffer()))
+          },
+          readFile,
+          unlink,
+          dialog: async (message, detail, buttons) => {
+            const result = await electron.dialog.showMessageBox({
+              type: 'info',
+              message,
+              detail,
+              buttons: [...buttons],
+              defaultId: 0,
+              cancelId: buttons.length - 1,
+            })
+            return buttons[result.response] ?? ''
+          },
+          spawnDetached: (executable, args) => {
+            const child = spawn(executable, [...args], { detached: true, stdio: 'ignore', windowsHide: true })
+            child.unref()
+          },
+          runShellScript: async (script, elevated) => {
+            const scriptPath = join(tmpdir(), `dsh-update-${process.pid}-${Date.now()}.sh`)
+            await writeFile(scriptPath, script)
+            const command = `bash ${JSON.stringify(scriptPath)}`
+            const appleScript = elevated
+              ? `do shell script ${JSON.stringify(command)} with administrator privileges`
+              : `do shell script ${JSON.stringify(command)}`
+            return await new Promise((resolveScript) => {
+              const child = spawn('osascript', ['-e', appleScript], { stdio: ['ignore', 'ignore', 'pipe'] })
+              let detail = ''
+              child.stderr.setEncoding('utf8')
+              child.stderr.on('data', (chunk) => { detail += chunk })
+              child.once('error', () => resolveScript({ ok: false, detail: 'osascript failed to start' }))
+              child.once('exit', (code) => {
+                void unlink(scriptPath).catch(() => {})
+                resolveScript({ ok: code === 0, detail })
+              })
+            })
+          },
+          quit: () => {
+            adapter.quit()
+          },
+        },
+        logger,
+      })
+      : undefined
     return new ApplicationController({
       adapter,
       harness,
       startupDocument: fileURLToPath(new URL('../static/startup.html', import.meta.url)),
       errorDocument: fileURLToPath(new URL('../static/error.html', import.meta.url)),
       userDataPath,
+      ...(updater === undefined ? {} : { updater }),
     })
   })
 }

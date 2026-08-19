@@ -22,7 +22,7 @@ DeepSeek Harness 通过 Host/Web 组合提供浏览器界面。希望获得应�
 
 Desktop 应用只拥有自己创建的分离式进程组。退出、重试、应用信号和意外退出共用一个关闭屏障：所拥有的进程组先收到 `SIGTERM`，可在 5 秒内退出，否则会收到 `SIGKILL`。应用既不发现，也不向无关 Harness 进程发送信号。
 
-打包后端使用[封闭运行时决策](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)所述的私有已验证依赖部署。打包目标固定为 `darwin-arm64`，会拒绝其他所有宿主目标、审计所有 Mach-O 文件是否为 arm64，从已暂存运行时中剔除源码与 source map，并在签名前把已包含的运行时复制到 App 内。所有交付的代码对象均使用带 Hardened Runtime 的 ad-hoc 签名；原生模块只会收到已审查的 JIT、未签名可执行内存和库验证 entitlements。此个人构建未经公证，也没有更新器。
+打包后端使用[封闭运行时决策](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)所述的私有已验证依赖部署。打包目标固定为 `darwin-arm64`，会拒绝其他所有宿主目标、审计所有 Mach-O 文件是否为 arm64，从已暂存运行时中剔除源码与 source map，并在签名前把已包含的运行时复制到 App 内。所有交付的代码对象均使用带 Hardened Runtime 的 ad-hoc 签名；原生模块只会收到已审查的 JIT、未签名可执行内存和库验证 entitlements。此个人构建未经公证；更新来自[桌面更新器决策](2026-08-18-desktop-updater.md)。
 
 ## 数据与生命周期边界
 
@@ -42,4 +42,4 @@ Electron 拥有 `~/Library/Application Support/DeepSeek Harness`，包括 `windo
 
 ## 结果
 
-应用在自包含 App 与 DMG 中保留现有 Web UI 和 Host/Web 行为，回环监听器、后端生命周期、封闭运行时与 macOS 签名则成为 Desktop 拥有的职责。分发方式有意保持个人用途：因为 ad-hoc 构建未经公证，Gatekeeper 可能要求显式允许首次启动，更新则需要重新构建并替换 App。Electron 原生 IPC host 仍可实现，但它需要新的传输决策，不能通过增量重解本决策来完成。
+应用在自包含 App 与 DMG 中保留现有 Web UI 和 Host/Web 行为，回环监听器、后端生命周期、封闭运行时与 macOS 签名则成为 Desktop 拥有的职责。分发方式有意保持个人用途：因为 ad-hoc 构建未经公证，Gatekeeper 可能要求显式允许首次启动，应用内更新安装新下载的副本之后同样如此。Electron 原生 IPC host 仍可实现，但它需要新的传输决策，不能通过增量重解本决策来完成。

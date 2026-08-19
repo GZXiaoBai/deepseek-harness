@@ -25,7 +25,7 @@ macOS 个人构建使用带 Hardened Runtime 的 ad-hoc 签名，但未经公证
 
 Windows 个人构建有意保持未签名，因此 Microsoft Defender SmartScreen 可能显示「Windows 已保护你的电脑」。仅当安装程序来自你信任且已核验的来源时，才选择「仍要运行」；企业策略可能不提供该选项。请遵循 Microsoft 当前的 [SmartScreen 信誉指南](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)。请勿在系统范围内禁用 Microsoft Defender 或 SmartScreen。
 
-两个平台都不提供更新器。更新时需要手动构建并安装替代版本。
+应用会对照所配置 GitHub 仓库的 Releases（默认 `GZXiaoBai/deepseek-harness`、`stable` 频道）检查更新并就地升级。**Check for Updates…** 菜单项执行手动检查；**Automatic Updates** 开关控制启动时的自动检查。Windows 会下载 NSIS 安装程序，按 release 校验和验证 SHA-256 后，在退出时静默运行安装程序。macOS 会下载 DMG、验证后通过管理员授权把新 App 安装进 `/Applications`；由于个人构建是 ad-hoc 签名且未公证，安装副本会移除 quarantine 属性，Gatekeeper 仍可能要求首次启动时确认。更新偏好持久化在应用数据目录下的 `desktop-settings.json`。发布方式为打 `desktop-v<version>` 标签；标签工作流会构建两个平台并把安装程序、DMG 与按资产的校验和上传到 release。校验和不匹配会中止更新且不安装。
 
 ## 数据与日志
 

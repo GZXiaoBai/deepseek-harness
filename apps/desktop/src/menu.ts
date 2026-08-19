@@ -6,7 +6,8 @@ export type ApplicationMenuRole = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | '
 /** Framework-independent menu item consumed by the Electron adapter. */
 export interface ApplicationMenuItem {
   label?: string
-  type?: 'separator'
+  type?: 'separator' | 'checkbox'
+  checked?: boolean
   role?: ApplicationMenuRole
   accelerator?: string
   action?: MenuAction
@@ -21,6 +22,11 @@ export interface ApplicationMenuActions {
   reload: MenuAction
   openLogsDirectory: MenuAction
   quit: MenuAction
+  checkForUpdates: MenuAction
+  /** Toggles the persisted automatic-update preference and rebuilds the menu. */
+  setAutomaticUpdates: (enabled: boolean) => void
+  /** Whether automatic updates are currently enabled. */
+  automaticUpdatesEnabled: boolean
 }
 
 /**
@@ -34,6 +40,14 @@ export function createApplicationMenu(actions: ApplicationMenuActions): Applicat
     {
       label: 'DeepSeek Harness',
       submenu: [
+        { label: 'Check for Updates…', action: actions.checkForUpdates },
+        {
+          label: 'Automatic Updates',
+          type: 'checkbox',
+          checked: actions.automaticUpdatesEnabled,
+          action: () => actions.setAutomaticUpdates(!actions.automaticUpdatesEnabled),
+        },
+        { type: 'separator' },
         { label: 'Open Logs Directory', action: actions.openLogsDirectory },
         { type: 'separator' },
         { label: 'Quit', accelerator: 'CommandOrControl+Q', action: actions.quit },

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-16-macos-desktop-app.md
-2026-08-16-macos-desktop-app.md: 52b807d05048ce5a05cc67323c0f210a38da5db5
-2026-08-16-macos-desktop-app.zh.md: 0bb0962a17465227881293e3224e9e3bddae2db5
+2026-08-16-macos-desktop-app.md: c763cb4118a6bb279a53ca6042d5f7ca460bfff6
+2026-08-16-macos-desktop-app.zh.md: 9f33d8ff8af0c0ac071bceb5e3f571d34231e3e3

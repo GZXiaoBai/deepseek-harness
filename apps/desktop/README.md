@@ -25,7 +25,7 @@ On Windows, run `DeepSeek Harness Setup <version>-x64.exe`. The assisted NSIS in
 
 The Windows personal build is intentionally unsigned, so Microsoft Defender SmartScreen may show **Windows protected your PC**. Continue with **Run anyway** only when you obtained and verified the installer from a trusted source; enterprise policy may prevent that option. Follow Microsoft's current [SmartScreen reputation guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation). Do not disable Microsoft Defender or SmartScreen globally.
 
-Neither platform has an updater. Build and install a replacement manually when updating.
+The application checks for updates against the configured GitHub repository's Releases (default `GZXiaoBai/deepseek-harness`, `stable` channel) and updates in place. The **Check for Updates…** menu item runs a manual check; **Automatic Updates** toggles the startup check. Windows downloads the NSIS installer, verifies its SHA-256 against the release checksum, and runs it silently on quit. macOS downloads the DMG, verifies it, and installs the new App into `/Applications` through an administrator prompt; because the personal build is ad-hoc signed and not notarized, the installed copy has its quarantine attribute removed and Gatekeeper may still ask to confirm the first launch. Update preferences persist in `desktop-settings.json` below the application-data directory. A release is published by tagging `desktop-v<version>`; the tag workflow builds both platforms and uploads the installer, DMG, and per-asset checksums. A checksum mismatch aborts the update without installing.
 
 ## Data and logs
 
