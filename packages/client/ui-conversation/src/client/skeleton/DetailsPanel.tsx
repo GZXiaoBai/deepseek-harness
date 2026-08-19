@@ -124,7 +124,7 @@ export function DetailsPanel(props: DetailsPanelProps) {
 function ToolDetails(props: {
   useSession: DetailsPanelProps['useSession']
   useSessions: DetailsPanelProps['useSessions']
-  sessionId: string
+  sessionId: DetailsPanelProps['sessionId']
   selection: { callId?: string } | null
   renderSlot: DetailsPanelProps['renderSlot']
   t: DetailsPanelProps['t']

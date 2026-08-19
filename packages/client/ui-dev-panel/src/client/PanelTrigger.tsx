@@ -1,5 +1,7 @@
 /** Sidebar footer trigger that opens the details column onto the review panel. */
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls the sidebar SlotMap merge (the footer action seat).
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import css from './ReviewPanel.module.css'
 
 /** Registrant-private injected share of the footer trigger. */

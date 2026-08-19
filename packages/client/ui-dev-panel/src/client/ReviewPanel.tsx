@@ -11,12 +11,12 @@ import css from './ReviewPanel.module.css'
 type TabId = 'files' | 'history' | 'vcs'
 
 /** Extracts the text payload of one content block. */
-function blockText(block: { type: string; text?: unknown }): string {
-  return block.type === 'text' && typeof block.text === 'string' ? block.text : ''
+function blockText(block: { kind: string; text?: unknown }): string {
+  return block.kind === 'text' && typeof block.text === 'string' ? block.text : ''
 }
 
 /** Renders the first non-empty text line of a message row. */
-function messageSummary(content: readonly { type: string; text?: unknown }[]): string {
+function messageSummary(content: readonly { kind: string; text?: unknown }[]): string {
   for (const block of content) {
     const text = blockText(block).trim()
     if (text !== '') return text.split('\n')[0] ?? ''
@@ -28,9 +28,17 @@ export function ReviewPanel({ useSession, useSessions, sessionId, callPanel, t }
   const [tab, setTab] = useState<TabId>('files')
   const workspaceRoot = useSessions(list => list.byId[sessionId]?.cwd)
 
-  const history = useSession(s => s.chat.nodes)
+  const history = useSession(s => s.chat.legacy.nodes)
   const messages = useMemo(
-    () => history.values().filter((node): node is Extract<typeof node, { kind: 'user' | 'assistant' }> => node.kind === 'user' || node.kind === 'assistant'),
+    () => history
+      .filter((node): node is Extract<typeof node, { kind: 'user' | 'assistant' }> => node.kind === 'user' || node.kind === 'assistant')
+      .map(node => ({
+        key: String(node.seq),
+        kind: node.kind,
+        text: messageSummary(
+          (node.kind === 'user' ? node.content : node.blocks) as unknown as readonly { kind: string; text?: unknown }[],
+        ),
+      })),
     [history],
   )
 
@@ -60,9 +68,9 @@ export function ReviewPanel({ useSession, useSessions, sessionId, callPanel, t }
             : (
               <ul className={css.history}>
                 {messages.map(message => (
-                  <li key={message.seq} className={message.kind === 'user' ? css.userRow : css.assistantRow}>
+                  <li key={message.key} className={message.kind === 'user' ? css.userRow : css.assistantRow}>
                     <span className={css.rowKind}>{message.kind === 'user' ? 'User' : 'Assistant'}</span>
-                    <span className={css.rowText}>{messageSummary(message.content)}</span>
+                    <span className={css.rowText}>{message.text}</span>
                   </li>
                 ))}
               </ul>
@@ -98,13 +106,13 @@ function FilesTab(props: {
     }
     setError(null)
     setDirectory(path)
-    setEntries(response.entries ?? [])
+    if ('entries' in response) setEntries(response.entries)
   }
 
   const openPreview = async (name: string): Promise<void> => {
     const path = directory === '' ? name : `${directory}/${name}`
     const response = await props.callPanel('/dev-panel.read-file', { root: props.root, path })
-    if (!response.ok || response.content === undefined) {
+    if (!response.ok || !('content' in response) || response.content === undefined) {
       setError(props.previewErrorLabel)
       return
     }
@@ -162,7 +170,7 @@ function FilesTab(props: {
 function VcsTab(props: {
   root: string
   callPanel: ReviewPanelProps['callPanel']
-  t: (key: string) => string
+  t: ReviewPanelProps['t']
 }): JSX.Element {
   const [status, setStatus] = useState<string>('')
   const [selected, setSelected] = useState<string | null>(null)
@@ -177,13 +185,13 @@ function VcsTab(props: {
       return
     }
     setError(null)
-    setStatus(response.status ?? '')
+    if ('status' in response) setStatus(response.status)
   }
 
   const showDiff = async (path: string): Promise<void> => {
     const response = await props.callPanel('/dev-panel.git-diff', { root: props.root, file: path })
     setSelected(path)
-    setDiff(!response.ok || response.diff === undefined ? '' : response.diff)
+    setDiff(!response.ok || !('diff' in response) || response.diff === undefined ? '' : response.diff)
   }
 
   const rows = useMemo(
