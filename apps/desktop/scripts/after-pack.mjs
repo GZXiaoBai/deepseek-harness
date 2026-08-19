@@ -5,6 +5,7 @@ import {
   assertRuntimeContainsNoLinks,
   assertRuntimeSymlinksContained,
   resolveCliEntryPath,
+  resolveNodePtyIgnoredRelativePath,
   resolveWebFrontendIndex,
 } from './stage-runtime.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
@@ -76,7 +77,10 @@ export async function copyRuntimeForPackage(plan, options = {}) {
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.destinationRuntime)
   await resolveCliEntryPath(plan.destinationRuntime)
   await resolveWebFrontendIndex(plan.destinationRuntime)
-  if (plan.target.platform === 'win32') await auditX64Pe(plan.destinationRuntime)
+  if (plan.target.platform === 'win32') {
+    const nodePtyIgnored = await resolveNodePtyIgnoredRelativePath(plan.destinationRuntime)
+    await auditX64Pe(plan.destinationRuntime, { ignoredRelativePaths: [nodePtyIgnored] })
+  }
 }
 
 /** @param {string} source @param {string} destination */

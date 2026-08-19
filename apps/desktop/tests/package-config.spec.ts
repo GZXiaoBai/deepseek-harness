@@ -720,16 +720,34 @@ async function createHoistedHookRuntime(runtimeDirectory: string): Promise<void>
   await writeFile(join(runtimeDirectory, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-desktop-runtime' }))
   const scope = join(runtimeDirectory, 'node_modules/@deepseek-ai')
   const dsh = join(scope, 'dsh')
+  const base = join(scope, 'dsh-base')
+  const subprocess = join(scope, 'dsh-subprocess-local')
   const webApp = join(scope, 'dsh-web-app')
   const frontend = join(scope, 'dsh-web-frontend')
+  const nodePty = join(runtimeDirectory, 'node_modules/node-pty')
   await mkdir(join(dsh, 'lib'), { recursive: true })
+  await mkdir(base, { recursive: true })
+  await mkdir(subprocess, { recursive: true })
   await mkdir(webApp, { recursive: true })
   await mkdir(join(frontend, 'dist'), { recursive: true })
+  await mkdir(join(nodePty, 'prebuilds/win32-x64'), { recursive: true })
   await writeFile(join(dsh, 'package.json'), JSON.stringify({
     name: '@deepseek-ai/dsh',
-    dependencies: { '@deepseek-ai/dsh-web-app': 'workspace:^' },
+    dependencies: {
+      '@deepseek-ai/dsh-base': 'workspace:^',
+      '@deepseek-ai/dsh-web-app': 'workspace:^',
+    },
   }))
   await writeFile(join(dsh, 'lib/bin.js'), '')
+  await writeFile(join(base, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-base',
+    dependencies: { '@deepseek-ai/dsh-subprocess-local': 'workspace:^' },
+  }))
+  await writeFile(join(subprocess, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-subprocess-local',
+    dependencies: { 'node-pty': '1.2.0-beta.15' },
+  }))
+  await writeFile(join(nodePty, 'package.json'), JSON.stringify({ name: 'node-pty', version: '1.2.0-beta.15' }))
   await writeFile(join(webApp, 'package.json'), JSON.stringify({
     name: '@deepseek-ai/dsh-web-app',
     dependencies: { '@deepseek-ai/dsh-web-frontend': 'workspace:^' },
