@@ -2,10 +2,6 @@ appId: ai.deepseek.harness
 productName: DeepSeek Harness
 electronDist: node_modules/electron/dist
 asar: true
-# Store (no payload compression): install is a plain file copy, avoiding the
-# single-threaded LZMA extraction that dominates NSIS install time. Automatic
-# updates still download only changed blocks through the NSIS blockmap.
-compression: store
 files:
   - lib/*.js
   - static/**

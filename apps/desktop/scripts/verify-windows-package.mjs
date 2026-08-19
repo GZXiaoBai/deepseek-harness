@@ -235,13 +235,13 @@ async function verifyInstalledWindowsPackage(installer) {
     await writeFile(preservationMarker, 'preserve')
     const uninstallStarted = Date.now()
     await run(installedPaths.uninstaller, ['/S'], { windowsHide: true })
-    const uninstallMs = Date.now() - uninstallStarted
     installed = false
     await waitForWindowsUninstallCleanup([
       installedPaths.installDirectory,
       paths.startMenuShortcut,
       paths.desktopShortcut,
     ], SHUTDOWN_TIMEOUT_MS)
+    const uninstallMs = Date.now() - uninstallStarted
     await requireOrdinaryFile(preservationMarker, 'NSIS uninstall removed preserved application data')
     return { installMs, uninstallMs }
   } finally {
