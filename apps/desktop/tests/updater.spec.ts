@@ -202,7 +202,7 @@ describe('desktop updater lifecycle', () => {
 
   it('reports up to date when no newer release exists', async () => {
     const { updater, ops } = await createUpdater()
-    ops.fetchJson.mockResolvedValue([releaseFixture('desktop-v0.1.0', '0.1.0')])
+    ops.fetchJson?.mockResolvedValue([releaseFixture('desktop-v0.1.0', '0.1.0')])
 
     await expect(updater.check()).resolves.toEqual({ kind: 'up-to-date' })
   })
