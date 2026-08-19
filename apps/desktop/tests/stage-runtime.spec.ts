@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -37,6 +37,7 @@ interface StageRuntimeModule {
   ) => Promise<void>
   pruneRuntimeSources: (runtimeDirectory: string) => Promise<number>
   assertRuntimeNoPrunedEntries: (runtimeDirectory: string) => Promise<void>
+  ensureConptyReleaseAssets: (runtimeDirectory: string) => Promise<void>
   assertRuntimeContainsNoLinks: (runtimeDirectory: string) => Promise<void>
   auditX64Pe: (runtimeDirectory: string) => Promise<readonly string[]>
 }
@@ -684,5 +685,32 @@ describe('desktop runtime staging', () => {
     await expect(assertRuntimeNoPrunedEntries(runtimeDirectory)).rejects.toThrow(
       `Staged runtime entry points at a pruned source file: ${join(binBroken, 'package.json')} (entry ./src/cli.mts)`,
     )
+  })
+
+  it('mirrors the ConPTY assets beside a rebuilt win32 conpty.node', async () => {
+    const runtimeDirectory = await realpath(await mkdtemp(join(tmpdir(), 'dsh-stage-conpty-')))
+    directories.push(runtimeDirectory)
+    const dsh = join(runtimeDirectory, 'node_modules/@deepseek-ai/dsh')
+    const base = join(dsh, 'node_modules/@deepseek-ai/dsh-base')
+    const subprocess = join(base, 'node_modules/@deepseek-ai/dsh-subprocess-local')
+    const nodePtyRoot = join(subprocess, 'node_modules/node-pty')
+    const release = join(nodePtyRoot, 'build/Release')
+    const prebuild = join(nodePtyRoot, 'prebuilds/win32-x64')
+    await mkdir(join(release, 'conpty'), { recursive: true })
+    await mkdir(join(prebuild, 'conpty'), { recursive: true })
+    await writeFile(join(runtimeDirectory, 'package.json'), JSON.stringify({ name: 'runtime', dependencies: { '@deepseek-ai/dsh': '*' } }))
+    await writeFile(join(dsh, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', dependencies: { '@deepseek-ai/dsh-base': '*' } }))
+    await writeFile(join(base, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-base', dependencies: { '@deepseek-ai/dsh-subprocess-local': '*' } }))
+    await writeFile(join(subprocess, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-subprocess-local', dependencies: { 'node-pty': '*' } }))
+    await writeFile(join(nodePtyRoot, 'package.json'), JSON.stringify({ name: 'node-pty' }))
+    await writeFile(join(release, 'conpty.node'), 'binary')
+    await writeFile(join(prebuild, 'conpty/conpty.dll'), 'dll')
+    await writeFile(join(prebuild, 'conpty/OpenConsole.exe'), 'exe')
+
+    const { ensureConptyReleaseAssets } = await loadStageRuntime()
+    await ensureConptyReleaseAssets(runtimeDirectory)
+
+    await expect(readFile(join(release, 'conpty/conpty.dll'), 'utf8')).resolves.toBe('dll')
+    await expect(readFile(join(release, 'conpty/OpenConsole.exe'), 'utf8')).resolves.toBe('exe')
   })
 })

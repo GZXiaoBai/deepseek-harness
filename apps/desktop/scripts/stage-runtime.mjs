@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { lstat, opendir, readFile, realpath, rm, stat, unlink } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, opendir, readFile, realpath, rm, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -121,6 +121,7 @@ export async function executeStagePlan(plan, options = {}) {
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
   await runCommand(plan.rebuildCommand)
+  if (plan.target.platform === 'win32') await ensureConptyReleaseAssets(plan.runtimeDirectory)
   await pruneRuntimeSources(plan.runtimeDirectory)
   await assertRuntimeNoPrunedEntries(plan.runtimeDirectory)
   await resolveCliEntryPath(plan.runtimeDirectory)
@@ -129,6 +130,60 @@ export async function executeStagePlan(plan, options = {}) {
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
   const auditRuntime = options.auditRuntime ?? (plan.target.platform === 'win32' ? auditX64Pe : auditArm64MachO)
   await auditRuntime(plan.runtimeDirectory)
+}
+
+/**
+ * Copies the ConPTY runtime assets beside the rebuilt win32 conpty.node.
+ *
+ * electron-rebuild compiles conpty.node into `build/Release` but the package's
+ * post-install step (disabled during staging) is what places conpty.dll and
+ * OpenConsole.exe there; the C++ loader resolves them relative to the loaded
+ * module. The win32 prebuild directory already carries the pair, so staging
+ * mirrors them into the release directory.
+ *
+ * @param {string} runtimeDirectory Deployed Desktop runtime package root.
+ * @returns {Promise<void>} Resolves after the assets are in place.
+ */
+export async function ensureConptyReleaseAssets(runtimeDirectory) {
+  const canonicalRuntimeDirectory = await realpath(runtimeDirectory)
+  const nodePtyPackage = await resolveNodePtyPackage(runtimeDirectory, canonicalRuntimeDirectory)
+  const releaseDirectory = join(dirname(nodePtyPackage), 'build/Release')
+  const prebuildDirectory = join(dirname(nodePtyPackage), 'prebuilds/win32-x64')
+  const releaseConpty = join(releaseDirectory, 'conpty')
+  await mkdir(releaseConpty, { recursive: true })
+  for (const asset of ['conpty.dll', 'OpenConsole.exe']) {
+    await copyFile(join(prebuildDirectory, 'conpty', asset), join(releaseConpty, asset))
+  }
+}
+
+/** @param {string} runtimeDirectory @param {string} canonicalRuntimeDirectory */
+async function resolveNodePtyPackage(runtimeDirectory, canonicalRuntimeDirectory) {
+  try {
+    const runtimeRequire = createRequire(join(runtimeDirectory, 'package.json'))
+    const dshPackage = await resolveInternalPackage(
+      runtimeRequire,
+      '@deepseek-ai/dsh/package.json',
+      canonicalRuntimeDirectory,
+    )
+    const basePackage = await resolveInternalPackage(
+      createRequire(dshPackage),
+      '@deepseek-ai/dsh-base/package.json',
+      canonicalRuntimeDirectory,
+    )
+    const subprocessPackage = await resolveInternalPackage(
+      createRequire(basePackage),
+      '@deepseek-ai/dsh-subprocess-local/package.json',
+      canonicalRuntimeDirectory,
+    )
+    return await resolveInternalPackage(
+      createRequire(subprocessPackage),
+      'node-pty/package.json',
+      canonicalRuntimeDirectory,
+    )
+  } catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND') throw error
+    throw new Error('Staged node-pty package is missing from the runtime dependency closure')
+  }
 }
 
 /** Extensions that exist only for development, debugging, or rebuild debris. */
@@ -257,33 +312,7 @@ function collectRuntimeExportValues(value, violations) {
  */
 export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) {
   const canonicalRuntimeDirectory = await realpath(runtimeDirectory)
-  let nodePtyPackage
-  try {
-    const runtimeRequire = createRequire(join(runtimeDirectory, 'package.json'))
-    const dshPackage = await resolveInternalPackage(
-      runtimeRequire,
-      '@deepseek-ai/dsh/package.json',
-      canonicalRuntimeDirectory,
-    )
-    const basePackage = await resolveInternalPackage(
-      createRequire(dshPackage),
-      '@deepseek-ai/dsh-base/package.json',
-      canonicalRuntimeDirectory,
-    )
-    const subprocessPackage = await resolveInternalPackage(
-      createRequire(basePackage),
-      '@deepseek-ai/dsh-subprocess-local/package.json',
-      canonicalRuntimeDirectory,
-    )
-    nodePtyPackage = await resolveInternalPackage(
-      createRequire(subprocessPackage),
-      'node-pty/package.json',
-      canonicalRuntimeDirectory,
-    )
-  } catch (error) {
-    if (error.code !== 'MODULE_NOT_FOUND') throw error
-    throw new Error('Staged node-pty package is missing from the runtime dependency closure')
-  }
+  const nodePtyPackage = await resolveNodePtyPackage(runtimeDirectory, canonicalRuntimeDirectory)
 
   const nodePtyDirectory = dirname(nodePtyPackage)
   const prebuildsDirectory = join(nodePtyDirectory, 'prebuilds')
@@ -317,14 +346,13 @@ export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) 
     canonicalRuntimeDirectory,
     `Staged node-pty win32-x64 prebuild must be an ordinary internal directory: ${retainedDirectory}`,
   )
+  // node-pty 1.2-beta ships a ConPTY-only Windows runtime: winpty is gone and
+  // the win32 prebuilds carry conpty.node plus the ConPTY assets, no pty.node.
   for (const relativePath of [
-    'pty.node',
     'conpty.node',
     'conpty_console_list.node',
     'conpty/conpty.dll',
     'conpty/OpenConsole.exe',
-    'winpty.dll',
-    'winpty-agent.exe',
   ]) {
     await requireOrdinaryFile(
       join(retainedDirectory, relativePath),
