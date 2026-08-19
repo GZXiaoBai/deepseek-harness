@@ -19,7 +19,7 @@ None.
 
 ## Model Experience
 
-None: the panel renders workspace and git state in the browser and never reaches a model request.
+None, as the panel renders workspace and git state in the browser and never reaches a model request.
 
 #### KV Cache effect
 

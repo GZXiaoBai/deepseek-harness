@@ -4,7 +4,7 @@
  * standard kit (workspace root, conversation nodes) or the injected host
  * route caller.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type JSX } from 'react'
 import type { ReviewPanelProps } from './contract/slots.ts'
 import css from './ReviewPanel.module.css'
 
@@ -112,7 +112,7 @@ function FilesTab(props: {
   const openPreview = async (name: string): Promise<void> => {
     const path = directory === '' ? name : `${directory}/${name}`
     const response = await props.callPanel('/dev-panel.read-file', { root: props.root, path })
-    if (!response.ok || !('content' in response) || response.content === undefined) {
+    if (!response.ok || !('content' in response)) {
       setError(props.previewErrorLabel)
       return
     }
@@ -191,7 +191,7 @@ function VcsTab(props: {
   const showDiff = async (path: string): Promise<void> => {
     const response = await props.callPanel('/dev-panel.git-diff', { root: props.root, file: path })
     setSelected(path)
-    setDiff(!response.ok || !('diff' in response) || response.diff === undefined ? '' : response.diff)
+    setDiff(!response.ok || !('diff' in response) ? '' : response.diff)
   }
 
   const rows = useMemo(

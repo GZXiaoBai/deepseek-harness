@@ -45,7 +45,7 @@ describe('desktop application menu', () => {
       label: 'Automatic Updates',
       type: 'checkbox',
       checked: true,
-      action: expect.any(Function),
+      action: expect.any(Function) as () => void,
     })
   })
 

@@ -110,7 +110,7 @@ describe('git invocations', () => {
 
     const invocation = await runGit(shell, { root }, 'git status --porcelain')
 
-    expect(shell.resolve({ command: '', workdir: root, stdoutMaxBytes: 1 } as never)).toMatchObject({ cwd: root })
+    expect(shell.resolve({ command: '', workdir: root, stdoutMaxBytes: 1 })).toMatchObject({ cwd: root })
     if ('ok' in invocation) throw new Error('expected success')
     expect(invocation.result.stdout.text).toBe(' M src/index.ts\n')
   })

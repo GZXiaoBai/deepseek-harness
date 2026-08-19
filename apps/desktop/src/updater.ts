@@ -339,7 +339,7 @@ export class DesktopUpdater {
         this.#preferences.channel,
         this.#currentVersion,
         this.#platform,
-        this.#ops.fetchJson,
+        url => this.#ops.fetchJson(url),
       )
       this.#logger.log('updater-checked', {
         repository: this.#preferences.repository,
@@ -403,8 +403,8 @@ export class DesktopUpdater {
       artifactPath,
       update.assetName ?? '',
       checksumAssets,
-      this.#ops.fetchText,
-      this.#ops.readFile,
+      url => this.#ops.fetchText(url),
+      path => this.#ops.readFile(path),
     )
   }
 

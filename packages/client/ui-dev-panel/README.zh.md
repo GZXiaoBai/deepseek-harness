@@ -16,7 +16,7 @@ DeepSeek Harness Web UI 的应用内审查面板：一个侧栏底部触发器�
 
 ## Model Experience
 
-无：面板在浏览器中呈现会话、工作区与 git 状态，绝不触达模型请求。
+无，因为面板在浏览器中呈现会话、工作区与 git 状态，绝不触达模型请求。
 
 #### KV Cache effect
 

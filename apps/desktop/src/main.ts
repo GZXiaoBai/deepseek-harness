@@ -822,8 +822,8 @@ async function runElectronMain(): Promise<void> {
               const child = spawn('osascript', ['-e', appleScript], { stdio: ['ignore', 'ignore', 'pipe'] })
               let detail = ''
               child.stderr.setEncoding('utf8')
-              child.stderr.on('data', (chunk) => { detail += chunk })
-              child.once('error', () => resolveScript({ ok: false, detail: 'osascript failed to start' }))
+              child.stderr.on('data', (chunk) => { detail += String(chunk) })
+              child.once('error', () => { resolveScript({ ok: false, detail: 'osascript failed to start' }) })
               child.once('exit', (code) => {
                 void unlink(scriptPath).catch(() => {})
                 resolveScript({ ok: code === 0, detail })

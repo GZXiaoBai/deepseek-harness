@@ -19,7 +19,7 @@
 
 ## Model Experience
 
-无：面板在浏览器中呈现工作区与 git 状态，绝不触达模型请求。
+无，因为面板在浏览器中呈现工作区与 git 状态，绝不触达模型请求。
 
 #### KV Cache effect
 

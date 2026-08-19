@@ -19,6 +19,7 @@ export const zh = {
 /** Dictionary keys of the review panel namespace. */
 export type DevPanelKey = keyof typeof zh
 
+/** English dictionary of the review panel namespace. */
 export const en: Record<DevPanelKey, string> = {
   'panel.title': 'Review Panel',
   'panel.tabs.files': 'Files',

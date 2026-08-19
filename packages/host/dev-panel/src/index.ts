@@ -213,12 +213,11 @@ function route(pathname: string, handler: (request: DevPanelRequestBody, respons
 /** @param shell Executor surface. @param request Normalized request. @param response Server response. */
 async function handleGitStatus(shell: DevPanelShell, request: DevPanelRequest, response: ServerResponse): Promise<void> {
   const invocation = await runGit(shell, request, 'git status --porcelain')
-  if ('ok' in invocation && !invocation.ok) {
+  if ('ok' in invocation) {
     sendJson(response, { ok: false, error: invocation.error })
     return
   }
-  const result = invocation as GitInvocation
-  sendJson(response, { ok: true, status: result.result.stdout.text })
+  sendJson(response, { ok: true, status: invocation.result.stdout.text })
 }
 
 /** @param shell Executor surface. @param body Normalized request. @param response Server response. */
@@ -226,16 +225,15 @@ async function handleGitDiff(shell: DevPanelShell, body: DevPanelRequestBody, re
   const file = typeof body.file === 'string' && body.file !== '' ? body.file : undefined
   const command = `git diff -- ${file ?? '.'}`.trimEnd()
   const invocation = await runGit(shell, body, command)
-  if ('ok' in invocation && !invocation.ok) {
+  if ('ok' in invocation) {
     sendJson(response, { ok: false, error: invocation.error })
     return
   }
-  const result = invocation as GitInvocation
-  sendJson(response, { ok: true, diff: result.result.stdout.text })
+  sendJson(response, { ok: true, diff: invocation.result.stdout.text })
 }
 
 /** Services required by the review-panel host plugin. */
-export const inject = ['webServer', 'shell'] as const
+export const inject = ['webServer', 'shell']
 
 /**
  * Registers the four review-panel routes on the loopback Web server.

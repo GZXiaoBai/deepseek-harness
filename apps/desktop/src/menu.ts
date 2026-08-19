@@ -45,7 +45,7 @@ export function createApplicationMenu(actions: ApplicationMenuActions): Applicat
           label: 'Automatic Updates',
           type: 'checkbox',
           checked: actions.automaticUpdatesEnabled,
-          action: () => actions.setAutomaticUpdates(!actions.automaticUpdatesEnabled),
+          action: () => { actions.setAutomaticUpdates(!actions.automaticUpdatesEnabled) },
         },
         { type: 'separator' },
         { label: 'Open Logs Directory', action: actions.openLogsDirectory },
