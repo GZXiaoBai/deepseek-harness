@@ -59,7 +59,10 @@ export function renderToolDetails(
   t: TranslateNS<'conversation'>,
   description?: HostDescription,
 ): DetailsSlotProps['renderSlot'] {
-  return (_key, owner) => {
+  return (key, owner, options) => {
+    // The tabbed details column also renders the review-panel seat; only the
+    // tool seat owns this adapter.
+    if (key !== 'conversation.details.tool') return options?.fallback ?? null
     // PropsRenderSlots keeps its key generic even for this one-key share;
     // recover the concrete owner selected by the adapter's fixed slot.
     const details = owner as unknown as DetailsToolOwnerProps
