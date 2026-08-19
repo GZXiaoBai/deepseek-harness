@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,6 +10,7 @@ interface MachOAuditModule {
     options?: {
       describeFile(path: string): Promise<string>
       inspectArchitectures(path: string): Promise<readonly string[]>
+      ignoredRelativePaths?: readonly string[]
     },
   ) => Promise<readonly string[]>
 }
@@ -32,7 +33,7 @@ async function makeFixture(): Promise<{
   x64Node: string
   textFile: string
 }> {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-macho-audit-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-macho-audit-')))
   directories.push(root)
   const arm64Directory = join(root, 'node-pty/prebuilds/darwin-arm64')
   const x64Directory = join(root, 'node-pty/prebuilds/darwin-x64')
@@ -77,6 +78,19 @@ describe.skipIf(process.platform === 'win32')('Apple Silicon Mach-O audit', () =
     const { auditArm64MachO } = await loadAudit()
 
     await expect(auditArm64MachO(fixture.root, fixtureInspectors(fixture.x64Node))).resolves.toEqual([
+      fixture.arm64Node,
+      fixture.arm64Helper,
+    ].sort())
+  })
+
+  it('skips an ignored multi-platform prebuild directory instead of failing it', async () => {
+    const fixture = await makeFixture()
+    const { auditArm64MachO } = await loadAudit()
+
+    await expect(auditArm64MachO(fixture.root, {
+      ...fixtureInspectors(fixture.x64Node),
+      ignoredRelativePaths: ['node-pty/prebuilds/darwin-x64'],
+    })).resolves.toEqual([
       fixture.arm64Node,
       fixture.arm64Helper,
     ].sort())

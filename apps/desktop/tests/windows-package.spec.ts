@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -117,7 +117,7 @@ describe('Windows Desktop package verification', () => {
   })
 
   it('validates ordinary runtime anchors and every x64 PE in the unpacked app', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-layout-'))
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-windows-layout-')))
     directories.push(root)
     const appDirectory = join(root, 'win-unpacked')
     const nestedPe = await createWindowsApp(appDirectory)
@@ -179,7 +179,7 @@ describe('Windows Desktop package verification', () => {
   })
 
   it('permits only the exact expected x86 NSIS uninstaller in an installed x64 application', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-installed-layout-'))
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-windows-installed-layout-')))
     directories.push(root)
     const appDirectory = join(root, 'installed')
     const nestedPe = await createWindowsApp(appDirectory)
@@ -197,7 +197,7 @@ describe('Windows Desktop package verification', () => {
   }, 30_000)
 
   it('rejects any additional x86 PE beside the exact NSIS uninstaller exception', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-installed-rogue-pe-'))
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-windows-installed-rogue-pe-')))
     directories.push(root)
     const appDirectory = join(root, 'installed')
     await createWindowsApp(appDirectory)
@@ -213,7 +213,7 @@ describe('Windows Desktop package verification', () => {
   })
 
   it('rejects a declared NSIS exception when its reviewed machine type changes', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-windows-changed-uninstaller-'))
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-windows-changed-uninstaller-')))
     directories.push(root)
     const appDirectory = join(root, 'installed')
     await createWindowsApp(appDirectory)
@@ -434,19 +434,37 @@ async function createWindowsApp(appDirectory: string): Promise<string> {
   const runtime = join(resources, 'runtime')
   const scope = join(runtime, 'node_modules/@deepseek-ai')
   const dsh = join(scope, 'dsh')
+  const base = join(scope, 'dsh-base')
+  const subprocess = join(scope, 'dsh-subprocess-local')
   const webApp = join(scope, 'dsh-web-app')
   const frontend = join(scope, 'dsh-web-frontend')
+  const nodePty = join(runtime, 'node_modules/node-pty')
   const nestedPe = join(runtime, 'node_modules/native/addon.node')
   await mkdir(join(dsh, 'lib'), { recursive: true })
+  await mkdir(base, { recursive: true })
+  await mkdir(subprocess, { recursive: true })
   await mkdir(webApp, { recursive: true })
   await mkdir(join(frontend, 'dist'), { recursive: true })
+  await mkdir(join(nodePty, 'prebuilds/win32-x64'), { recursive: true })
   await mkdir(dirname(nestedPe), { recursive: true })
   await writeFile(join(runtime, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-desktop-runtime' }))
   await writeFile(join(dsh, 'package.json'), JSON.stringify({
     name: '@deepseek-ai/dsh',
-    dependencies: { '@deepseek-ai/dsh-web-app': 'workspace:^' },
+    dependencies: {
+      '@deepseek-ai/dsh-base': 'workspace:^',
+      '@deepseek-ai/dsh-web-app': 'workspace:^',
+    },
   }))
   await writeFile(join(dsh, 'lib/bin.js'), '')
+  await writeFile(join(base, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-base',
+    dependencies: { '@deepseek-ai/dsh-subprocess-local': 'workspace:^' },
+  }))
+  await writeFile(join(subprocess, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-subprocess-local',
+    dependencies: { 'node-pty': '1.2.0-beta.15' },
+  }))
+  await writeFile(join(nodePty, 'package.json'), JSON.stringify({ name: 'node-pty', version: '1.2.0-beta.15' }))
   await writeFile(join(webApp, 'package.json'), JSON.stringify({
     name: '@deepseek-ai/dsh-web-app',
     dependencies: { '@deepseek-ai/dsh-web-frontend': 'workspace:^' },

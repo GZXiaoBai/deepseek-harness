@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { lstat, opendir } from 'node:fs/promises'
+import { lstat, opendir, realpath } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 
 const MACH_O_EXTENSIONS = new Set(['.bundle', '.dylib', '.node', '.so'])
@@ -8,14 +8,16 @@ const MACH_O_EXTENSIONS = new Set(['.bundle', '.dylib', '.node', '.so'])
  * Audits every plausible binary in a macOS tree and requires arm64-only Mach-O files.
  *
  * @param {string} rootDirectory Root of the staged runtime or packaged application.
- * @param {{ describeFile?: (path: string) => Promise<string>, inspectArchitectures?: (path: string) => Promise<readonly string[]> }} [options] Injectable binary inspectors.
+ * @param {{ describeFile?: (path: string) => Promise<string>, inspectArchitectures?: (path: string) => Promise<readonly string[]>, ignoredRelativePaths?: readonly string[] }} [options] Injectable binary inspectors and audit exclusions.
  * @returns {Promise<readonly string[]>} Sorted absolute paths of the audited Mach-O files.
  */
 export async function auditArm64MachO(rootDirectory, options = {}) {
   const describeFile = options.describeFile ?? describeWithFile
   const inspectArchitectures = options.inspectArchitectures ?? inspectWithLipo
+  const root = await realpath(rootDirectory)
+  const ignored = new Set(options.ignoredRelativePaths ?? [])
   const candidates = []
-  for await (const path of walkFiles(rootDirectory)) {
+  for await (const path of walkFiles(root, ignored)) {
     const entry = await lstat(path)
     if (isBinaryCandidate(path, entry.mode)) candidates.push(path)
   }
@@ -74,12 +76,16 @@ async function runCapture(executable, args) {
   })
 }
 
-/** @param {string} directory */
-async function* walkFiles(directory) {
+/** @param {string} directory @param {ReadonlySet<string>} ignored */
+async function* walkFiles(directory, ignored, relativePath = '') {
   const entries = await opendir(directory)
   for await (const entry of entries) {
     const path = join(directory, entry.name)
+    const nextRelative = relativePath === '' ? entry.name : join(relativePath, entry.name)
+    if (entry.isDirectory()) {
+      if (!ignored.has(nextRelative)) yield* walkFiles(path, ignored, nextRelative)
+      continue
+    }
     if (entry.isFile()) yield path
-    if (entry.isDirectory()) yield* walkFiles(path)
   }
 }

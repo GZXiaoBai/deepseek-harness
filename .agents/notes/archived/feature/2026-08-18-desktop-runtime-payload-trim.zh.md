@@ -1,6 +1,7 @@
 # Agent Note: 精简并度量 Desktop 运行时载荷
 
 Status: implemented
+Archived: 2026-08-19
 
 [English](2026-08-18-desktop-runtime-payload-trim.md) | 中文
 

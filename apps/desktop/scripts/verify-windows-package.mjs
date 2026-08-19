@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import {
   assertRuntimeContainsNoLinks,
   resolveCliEntryPath,
+  resolveNodePtyIgnoredRelativePath,
   resolveWebFrontendIndex,
 } from './stage-runtime.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
@@ -94,7 +95,11 @@ export async function validateWindowsAppLayout(appDirectory, options = {}) {
   if (process.platform === 'win32') await requireNoWindowsReparsePoints(appDirectory)
   await resolveCliEntryPath(runtime)
   await resolveWebFrontendIndex(runtime)
-  const peFiles = await auditX64Pe(appDirectory, options)
+  const nodePtyIgnored = await resolveNodePtyIgnoredRelativePath(runtime)
+  const peFiles = await auditX64Pe(appDirectory, {
+    ...options,
+    ignoredRelativePaths: [join('resources', 'runtime', nodePtyIgnored)],
+  })
   if (peFiles.length === 0) throw new Error('Packaged Windows application contains no PE binaries')
   return { executable, runtime, peFiles }
 }
@@ -163,8 +168,8 @@ export async function verifyWindowsPackage() {
   const unpackedStats = await summarizeTree(plan.unpackedDirectory)
   const installerBytes = (await stat(installer)).size
   await verifyStandaloneWindowsLaunch(plan.unpackedDirectory)
-  const installMs = await verifyInstalledWindowsPackage(installer)
-  const stats = { installerBytes, appFiles: unpackedStats.files, appBytes: unpackedStats.bytes, installMs }
+  const { installMs, uninstallMs } = await verifyInstalledWindowsPackage(installer)
+  const stats = { installerBytes, appFiles: unpackedStats.files, appBytes: unpackedStats.bytes, installMs, uninstallMs }
   await writeFile(join(plan.releaseDirectory, 'verify-stats.json'), `${JSON.stringify(stats)}\n`)
   console.log(`Windows package stats: ${JSON.stringify(stats)}`)
   console.log(`Windows unpacked package verification passed: ${plan.unpackedDirectory}`)
@@ -188,10 +193,10 @@ async function verifyStandaloneWindowsLaunch(sourceDirectory) {
 }
 
 /**
- * Runs the silent per-user NSIS acceptance and returns the install duration.
+ * Runs the silent per-user NSIS acceptance and returns install and uninstall durations.
  *
  * @param {string} installer NSIS installer path.
- * @returns {Promise<number>} Silent install duration in milliseconds.
+ * @returns {Promise<{ installMs: number, uninstallMs: number }>} Silent install and uninstall durations in milliseconds.
  */
 async function verifyInstalledWindowsPackage(installer) {
   const localAppData = requiredEnvironment('LOCALAPPDATA')
@@ -228,7 +233,9 @@ async function verifyInstalledWindowsPackage(installer) {
 
     await mkdir(paths.userData, { recursive: true })
     await writeFile(preservationMarker, 'preserve')
+    const uninstallStarted = Date.now()
     await run(installedPaths.uninstaller, ['/S'], { windowsHide: true })
+    const uninstallMs = Date.now() - uninstallStarted
     installed = false
     await waitForWindowsUninstallCleanup([
       installedPaths.installDirectory,
@@ -236,7 +243,7 @@ async function verifyInstalledWindowsPackage(installer) {
       paths.desktopShortcut,
     ], SHUTDOWN_TIMEOUT_MS)
     await requireOrdinaryFile(preservationMarker, 'NSIS uninstall removed preserved application data')
-    return installMs
+    return { installMs, uninstallMs }
   } finally {
     if (installed && installedPaths !== undefined) {
       try {

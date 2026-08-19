@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { copyFile, lstat, mkdir, opendir, readFile, realpath, rm, stat, unlink } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, opendir, realpath, rm, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { auditArm64MachO } from './macho-audit.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
@@ -111,7 +111,7 @@ export async function executeStagePlan(plan, options = {}) {
   await runCommand(plan.deployCommand)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
-  await pruneUnsupportedNodePtyPrebuild(plan.runtimeDirectory, plan.target)
+  await validateNodePtyPrebuild(plan.runtimeDirectory, plan.target)
   const repairScript = await findRepairScript(plan.runtimeDirectory)
   await runCommand({
     executable: process.execPath,
@@ -122,13 +122,16 @@ export async function executeStagePlan(plan, options = {}) {
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
   await runCommand(plan.rebuildCommand)
   if (plan.target.platform === 'win32') await ensureConptyReleaseAssets(plan.runtimeDirectory)
-  await pruneRuntimeSources(plan.runtimeDirectory)
-  await assertRuntimeNoPrunedEntries(plan.runtimeDirectory)
   await resolveCliEntryPath(plan.runtimeDirectory)
   await resolveWebFrontendIndex(plan.runtimeDirectory)
   await assertRuntimeSymlinksContained(plan.runtimeDirectory)
   if (plan.target.platform === 'win32') await assertRuntimeContainsNoLinks(plan.runtimeDirectory)
-  const auditRuntime = options.auditRuntime ?? (plan.target.platform === 'win32' ? auditX64Pe : auditArm64MachO)
+  const nodePtyIgnored = await resolveNodePtyIgnoredRelativePath(plan.runtimeDirectory)
+  const auditRuntime = options.auditRuntime ?? (
+    plan.target.platform === 'win32'
+      ? root => auditX64Pe(root, { ignoredRelativePaths: [nodePtyIgnored] })
+      : root => auditArm64MachO(root, { ignoredRelativePaths: [nodePtyIgnored] })
+  )
   await auditRuntime(plan.runtimeDirectory)
 }
 
@@ -186,131 +189,18 @@ async function resolveNodePtyPackage(runtimeDirectory, canonicalRuntimeDirectory
   }
 }
 
-/** Extensions that exist only for development, debugging, or rebuild debris. */
-const RUNTIME_SOURCE_EXTENSIONS = new Set(['.cts', '.d.ts', '.map', '.mts', '.o', '.obj', '.ts'])
-
-/** Loadable entry extensions that pruning removes; `.map`/`.o`/`.obj` are never loadable. */
-const RUNTIME_ENTRY_SOURCE_EXTENSIONS = new Set(['.cts', '.mts', '.ts'])
-
 /**
- * Removes source, source-map, and rebuild-debris files from the staged runtime.
+ * Validates the node-pty prebuilds required by the native Desktop target.
  *
- * The staged closure ships every published package file, and TypeScript
- * sources plus source maps make up most of the 30k+ staged files without any
- * runtime role. Node never resolves them: the runtime manifest scan shows no
- * `main`/`exports` runtime condition pointing at `.ts`, and source maps are
- * debugger-only. Pruning after the Electron rebuild keeps the rebuild's
- * object files out of the shipped runtime, shrinking the installer payload
- * and the per-file antivirus cost of installation.
- *
- * @param {string} runtimeDirectory Deployed Desktop runtime package root.
- * @returns {Promise<number>} Number of pruned files.
- */
-export async function pruneRuntimeSources(runtimeDirectory) {
-  let pruned = 0
-  for await (const path of walk(runtimeDirectory)) {
-    const entry = await lstat(path)
-    if (!entry.isSymbolicLink() && entry.isFile() && RUNTIME_SOURCE_EXTENSIONS.has(extname(path))) {
-      await unlink(path)
-      pruned += 1
-    }
-  }
-  return pruned
-}
-
-/** Entry fields Node can load at runtime; `module` and `types` are bundler/compile-time only. */
-const RUNTIME_ENTRY_FIELDS = ['bin', 'main', 'exports']
-
-/** Export conditions Node's resolver actually evaluates. */
-const RUNTIME_EXPORT_CONDITIONS = new Set(['default', 'import', 'node', 'require'])
-
-/**
- * Rejects a package manifest whose runtime entry points at a pruned source file.
- *
- * Pruning removes `.ts`/`.mts`/`.cts` sources, so a future dependency that
- * routes a loadable entry (`main`, `module`, `bin`, or any `exports` condition
- * other than `types`) to such a file would fail when the plugin loads, not
- * when the tree is staged. This check scans every manifest after pruning and
- * fails the staging build with the offending package and entry, keeping the
- * prune set provably safe instead of depending on smoke coverage alone.
- *
- * @param {string} runtimeDirectory Deployed Desktop runtime package root.
- * @returns {Promise<void>} Resolves when no runtime entry names a pruned source file.
- */
-export async function assertRuntimeNoPrunedEntries(runtimeDirectory) {
-  for await (const path of walk(runtimeDirectory)) {
-    if (basename(path) !== 'package.json' || !(await stat(path)).isFile()) continue
-    const manifest = JSON.parse(await readFile(path, 'utf8'))
-    const violations = []
-    for (const field of RUNTIME_ENTRY_FIELDS) {
-      if (field === 'exports') {
-        collectRuntimeExportValues(manifest.exports, violations)
-      } else {
-        collectRuntimeFieldValues(manifest[field], violations)
-      }
-    }
-    if (violations.length > 0) {
-      const listed = violations.map(value => `entry ${value}`).join('; ')
-      throw new Error(`Staged runtime entry points at a pruned source file: ${path} (${listed})`)
-    }
-  }
-}
-
-/**
- * Collects loadable values from a non-exports entry field (`main`, `bin`).
- *
- * @param {unknown} value Manifest field value.
- * @param {string[]} violations Output array of offending entry values.
- */
-function collectRuntimeFieldValues(value, violations) {
-  if (typeof value === 'string') {
-    if (RUNTIME_ENTRY_SOURCE_EXTENSIONS.has(extname(value))) violations.push(value)
-    return
-  }
-  if (value === null || typeof value !== 'object') return
-  if (Array.isArray(value)) {
-    for (const item of value) collectRuntimeFieldValues(item, violations)
-    return
-  }
-  for (const entry of Object.values(value)) collectRuntimeFieldValues(entry, violations)
-}
-
-/**
- * Collects loadable values from an `exports` map, following only subpaths and
- * conditions Node's resolver evaluates. Bundler-only conditions (`source`,
- * `development`, `browser`, ...) and `types` never load at runtime.
- *
- * @param {unknown} value `exports` value.
- * @param {string[]} violations Output array of offending entry values.
- */
-function collectRuntimeExportValues(value, violations) {
-  if (typeof value === 'string') {
-    if (RUNTIME_ENTRY_SOURCE_EXTENSIONS.has(extname(value))) violations.push(value)
-    return
-  }
-  if (value === null || typeof value !== 'object') return
-  if (Array.isArray(value)) {
-    for (const item of value) collectRuntimeExportValues(item, violations)
-    return
-  }
-  for (const [key, entry] of Object.entries(value)) {
-    if (key.startsWith('.')) {
-      // Subpath entry (".", "./stream", ...): its value is a conditions map.
-      collectRuntimeExportValues(entry, violations)
-    } else if (RUNTIME_EXPORT_CONDITIONS.has(key)) {
-      collectRuntimeExportValues(entry, violations)
-    }
-  }
-}
-
-/**
- * Keeps only the node-pty prebuilds and build assets supported by the native Desktop target.
+ * The staged closure ships every published node-pty prebuild; this check only
+ * asserts that the target platform's runtime files are present and ordinary,
+ * so a packaging regression fails staging instead of the installed app.
  *
  * @param {string} runtimeDirectory Deployed Desktop runtime package root.
  * @param {{ platform: 'darwin', arch: 'arm64' } | { platform: 'win32', arch: 'x64' }} target Native target.
- * @returns {Promise<void>} Resolves after validating the retained prebuild and removing unsupported ones.
+ * @returns {Promise<void>} Resolves after validating the retained prebuild.
  */
-export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) {
+export async function validateNodePtyPrebuild(runtimeDirectory, target) {
   const canonicalRuntimeDirectory = await realpath(runtimeDirectory)
   const nodePtyPackage = await resolveNodePtyPackage(runtimeDirectory, canonicalRuntimeDirectory)
 
@@ -323,7 +213,6 @@ export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) 
   )
   if (target.platform === 'darwin') {
     const arm64Directory = join(prebuildsDirectory, 'darwin-arm64')
-    const x64Directory = join(prebuildsDirectory, 'darwin-x64')
     await requireOrdinaryInternalDirectory(
       arm64Directory,
       canonicalRuntimeDirectory,
@@ -331,12 +220,6 @@ export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) 
     )
     await requireOrdinaryFile(join(arm64Directory, 'pty.node'), 'Staged node-pty darwin-arm64 pty.node is missing')
     await requireOrdinaryFile(join(arm64Directory, 'spawn-helper'), 'Staged node-pty darwin-arm64 spawn-helper is missing')
-    await requireOrdinaryInternalDirectory(
-      x64Directory,
-      canonicalRuntimeDirectory,
-      `Staged node-pty darwin-x64 prebuild must be an ordinary internal directory: ${x64Directory}`,
-    )
-    await rm(x64Directory, { recursive: true })
     return
   }
 
@@ -359,59 +242,22 @@ export async function pruneUnsupportedNodePtyPrebuild(runtimeDirectory, target) 
       `Staged node-pty win32-x64 file is missing: ${relativePath}`,
     )
   }
-  const entries = await opendir(prebuildsDirectory)
-  for await (const entry of entries) {
-    if (entry.name === 'win32-x64') continue
-    const path = join(prebuildsDirectory, entry.name)
-    await requireOrdinaryInternalDirectory(
-      path,
-      canonicalRuntimeDirectory,
-      `Staged unsupported node-pty prebuild must be an ordinary internal directory: ${path}`,
-    )
-    await rm(path, { recursive: true })
-  }
+}
 
-  const conptyBuildRoot = join(nodePtyDirectory, 'third_party/conpty')
-  await requireOrdinaryInternalDirectory(
-    conptyBuildRoot,
-    canonicalRuntimeDirectory,
-    `Staged node-pty ConPTY build assets must be an ordinary internal directory: ${conptyBuildRoot}`,
-  )
-  let versionCount = 0
-  const versions = await opendir(conptyBuildRoot)
-  for await (const versionEntry of versions) {
-    const versionDirectory = join(conptyBuildRoot, versionEntry.name)
-    await requireOrdinaryInternalDirectory(
-      versionDirectory,
-      canonicalRuntimeDirectory,
-      `Staged node-pty ConPTY build version must be an ordinary internal directory: ${versionDirectory}`,
-    )
-    versionCount += 1
-    const retainedAsset = join(versionDirectory, 'win10-x64')
-    await requireOrdinaryInternalDirectory(
-      retainedAsset,
-      canonicalRuntimeDirectory,
-      `Staged node-pty win10-x64 ConPTY build asset must be an ordinary internal directory: ${retainedAsset}`,
-    )
-    for (const filename of ['conpty.dll', 'OpenConsole.exe']) {
-      await requireOrdinaryFile(
-        join(retainedAsset, filename),
-        `Staged node-pty win10-x64 ConPTY build file is missing: ${filename}`,
-      )
-    }
-    const assets = await opendir(versionDirectory)
-    for await (const assetEntry of assets) {
-      if (assetEntry.name === 'win10-x64') continue
-      const assetPath = join(versionDirectory, assetEntry.name)
-      await requireOrdinaryInternalDirectory(
-        assetPath,
-        canonicalRuntimeDirectory,
-        `Staged unsupported node-pty ConPTY build asset must be an ordinary internal directory: ${assetPath}`,
-      )
-      await rm(assetPath, { recursive: true })
-    }
-  }
-  if (versionCount === 0) throw new Error('Staged node-pty ConPTY build assets are missing')
+/**
+ * Resolves the node-pty package directory as a canonical root-relative path.
+ *
+ * node-pty ships prebuilds for every platform in one package, so the
+ * architecture audits exclude its directory while `validateNodePtyPrebuild`
+ * keeps the target platform's files under review.
+ *
+ * @param {string} runtimeDirectory Deployed Desktop runtime package root.
+ * @returns {Promise<string>} Canonical root-relative path of the node-pty package directory.
+ */
+export async function resolveNodePtyIgnoredRelativePath(runtimeDirectory) {
+  const canonicalRuntimeDirectory = await realpath(runtimeDirectory)
+  const nodePtyPackage = await resolveNodePtyPackage(runtimeDirectory, canonicalRuntimeDirectory)
+  return relative(canonicalRuntimeDirectory, dirname(nodePtyPackage))
 }
 
 /** @param {NodeJS.Require} packageRequire @param {string} specifier @param {string} canonicalRuntimeDirectory */

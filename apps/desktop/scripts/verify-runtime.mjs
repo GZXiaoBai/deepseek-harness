@@ -8,6 +8,7 @@ import {
   assertRuntimeContainsNoLinks,
   assertRuntimeSymlinksContained,
   resolveCliEntryPath,
+  resolveNodePtyIgnoredRelativePath,
   resolveWebFrontendIndex,
 } from './stage-runtime.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
@@ -28,7 +29,8 @@ await resolveWebFrontendIndex(runtimeDirectory)
 await assertRuntimeSymlinksContained(runtimeDirectory)
 if (target.platform === 'win32') {
   await assertRuntimeContainsNoLinks(runtimeDirectory)
-  await auditX64Pe(runtimeDirectory)
+  const nodePtyIgnored = await resolveNodePtyIgnoredRelativePath(runtimeDirectory)
+  await auditX64Pe(runtimeDirectory, { ignoredRelativePaths: [nodePtyIgnored] })
 }
 
 const dshHome = await mkdtemp(join(tmpdir(), 'dsh-desktop-runtime-'))

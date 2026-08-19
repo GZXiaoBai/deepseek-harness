@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,12 +31,11 @@ interface StageRuntimeModule {
       auditRuntime?: (runtimeDirectory: string) => Promise<void>
     },
   ) => Promise<void>
-  pruneUnsupportedNodePtyPrebuild: (
+  validateNodePtyPrebuild: (
     runtimeDirectory: string,
     target: Readonly<{ platform: 'darwin'; arch: 'arm64' } | { platform: 'win32'; arch: 'x64' }>,
   ) => Promise<void>
-  pruneRuntimeSources: (runtimeDirectory: string) => Promise<number>
-  assertRuntimeNoPrunedEntries: (runtimeDirectory: string) => Promise<void>
+  resolveNodePtyIgnoredRelativePath: (runtimeDirectory: string) => Promise<string>
   ensureConptyReleaseAssets: (runtimeDirectory: string) => Promise<void>
   assertRuntimeContainsNoLinks: (runtimeDirectory: string) => Promise<void>
   auditX64Pe: (runtimeDirectory: string) => Promise<readonly string[]>
@@ -268,11 +267,6 @@ describe('desktop runtime staging', () => {
       runCommand: async (command) => {
         commands.push(command)
         if (command.args.includes('deploy')) await createRuntimeClosure(runtimeDirectory)
-        if (command.executable === process.execPath) {
-          await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
-          const arm64Pty = await lstat(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'pty.node'))
-          expect(arm64Pty.isFile()).toBe(true)
-        }
       },
     })
 
@@ -326,87 +320,91 @@ describe('desktop runtime staging', () => {
     expect(commands.some(command => command.executable === 'pnpm' && command.args.includes('run'))).toBe(false)
   })
 
-  it('prunes only the resolved node-pty darwin-x64 prebuild directory', async () => {
+  it('validates the darwin-arm64 prebuild files without pruning any prebuild', async () => {
     const repoRoot = await makeRepository()
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     await createRuntimeClosure(runtimeDirectory)
-    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+    const { validateNodePtyPrebuild } = await loadStageRuntime()
 
-    await pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })
+    await expect(validateNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })).resolves.toBeUndefined()
 
-    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'pty.node'), 'utf8')).resolves.toBe('arm64 pty')
     await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'spawn-helper'), 'utf8')).resolves.toBe('arm64 helper')
+    await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'), 'pty.node'), 'utf8')).resolves.toBe('x64 pty')
+    await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'win32-x64'), 'conpty.node'), 'utf8')).resolves.toBe('x64 conpty')
   })
 
-  it('rejects a node-pty darwin-x64 symlink without deleting its external target', async () => {
+  it('rejects a node-pty darwin-arm64 prebuild missing its pty.node', async () => {
     const repoRoot = await makeRepository()
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     await createRuntimeClosure(runtimeDirectory)
-    const externalDirectory = await mkdtemp(join(tmpdir(), 'dsh-node-pty-x64-external-'))
+    await rm(join(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'), 'pty.node'))
+    const { validateNodePtyPrebuild } = await loadStageRuntime()
+
+    await expect(validateNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })).rejects.toThrow(
+      'Staged node-pty darwin-arm64 pty.node is missing',
+    )
+  })
+
+  it('rejects a symlinked node-pty prebuild directory', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await createRuntimeClosure(runtimeDirectory)
+    const externalDirectory = await mkdtemp(join(tmpdir(), 'dsh-node-pty-external-'))
     directories.push(externalDirectory)
     const marker = join(externalDirectory, 'keep.txt')
     await writeFile(marker, 'keep')
-    const x64Prebuild = nodePtyPrebuild(runtimeDirectory, 'darwin-x64')
-    await rm(x64Prebuild, { recursive: true })
-    await symlink(externalDirectory, x64Prebuild)
-    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+    const arm64Prebuild = nodePtyPrebuild(runtimeDirectory, 'darwin-arm64')
+    await rm(arm64Prebuild, { recursive: true })
+    await symlink(externalDirectory, arm64Prebuild)
+    const { validateNodePtyPrebuild } = await loadStageRuntime()
 
-    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })).rejects.toThrow(
-      'Staged node-pty darwin-x64 prebuild must be an ordinary internal directory:',
+    await expect(validateNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })).rejects.toThrow(
+      'Staged node-pty darwin-arm64 prebuild must be an ordinary internal directory:',
     )
     await expect(readFile(marker, 'utf8')).resolves.toBe('keep')
   })
 
-  it('rejects an unexpected node-pty darwin-x64 prebuild path shape', async () => {
+  it('validates the Windows x64 ConPTY prebuild files without pruning any prebuild', async () => {
     const repoRoot = await makeRepository()
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     await createRuntimeClosure(runtimeDirectory)
-    const x64Prebuild = nodePtyPrebuild(runtimeDirectory, 'darwin-x64')
-    await rm(x64Prebuild, { recursive: true })
-    await writeFile(x64Prebuild, 'not a directory')
-    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+    const { validateNodePtyPrebuild } = await loadStageRuntime()
 
-    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'darwin', arch: 'arm64' })).rejects.toThrow(
-      'Staged node-pty darwin-x64 prebuild must be an ordinary internal directory:',
-    )
-  })
-
-  it('keeps only the Windows x64 node-pty prebuild and ConPTY build assets for a Windows runtime', async () => {
-    const repoRoot = await makeRepository()
-    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
-    await createRuntimeClosure(runtimeDirectory)
-    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
-
-    await pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'win32', arch: 'x64' })
+    await expect(validateNodePtyPrebuild(runtimeDirectory, { platform: 'win32', arch: 'x64' })).resolves.toBeUndefined()
 
     await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'win32-x64'), 'conpty.node'), 'utf8'))
       .resolves.toBe('x64 conpty')
     await expect(readFile(join(nodePtyConptyBuildAsset(runtimeDirectory, 'win10-x64'), 'conpty.dll'), 'utf8'))
       .resolves.toBe('x64 build conpty dll')
-    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'win32-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(lstat(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(lstat(nodePtyConptyBuildAsset(runtimeDirectory, 'win10-arm64'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'win32-arm64'), 'pty.node'), 'utf8'))
+      .resolves.toBe('arm64 windows pty')
+    await expect(readFile(join(nodePtyPrebuild(runtimeDirectory, 'darwin-x64'), 'pty.node'), 'utf8')).resolves.toBe('x64 pty')
+    await expect(readFile(join(nodePtyConptyBuildAsset(runtimeDirectory, 'win10-arm64'), 'conpty.dll'), 'utf8'))
+      .resolves.toBe('arm64 build conpty dll')
   })
 
-  it('rejects a linked unsupported Windows ConPTY build asset without deleting its external target', async () => {
+  it('rejects a node-pty win32-x64 prebuild missing its conpty.node', async () => {
     const repoRoot = await makeRepository()
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     await createRuntimeClosure(runtimeDirectory)
-    const externalDirectory = await mkdtemp(join(tmpdir(), 'dsh-node-pty-conpty-arm64-external-'))
-    directories.push(externalDirectory)
-    const marker = join(externalDirectory, 'keep.txt')
-    await writeFile(marker, 'keep')
-    const arm64Asset = nodePtyConptyBuildAsset(runtimeDirectory, 'win10-arm64')
-    await rm(arm64Asset, { recursive: true })
-    await symlink(externalDirectory, arm64Asset)
-    const { pruneUnsupportedNodePtyPrebuild } = await loadStageRuntime()
+    await rm(join(nodePtyPrebuild(runtimeDirectory, 'win32-x64'), 'conpty.node'))
+    const { validateNodePtyPrebuild } = await loadStageRuntime()
 
-    await expect(pruneUnsupportedNodePtyPrebuild(runtimeDirectory, { platform: 'win32', arch: 'x64' })).rejects.toThrow(
-      'Staged unsupported node-pty ConPTY build asset must be an ordinary internal directory:',
+    await expect(validateNodePtyPrebuild(runtimeDirectory, { platform: 'win32', arch: 'x64' })).rejects.toThrow(
+      'Staged node-pty win32-x64 file is missing: conpty.node',
     )
-    await expect(readFile(marker, 'utf8')).resolves.toBe('keep')
+  })
+
+  it('resolves the node-pty package directory relative to the canonical runtime root', async () => {
+    const repoRoot = await makeRepository()
+    const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
+    await createRuntimeClosure(runtimeDirectory)
+    const { resolveNodePtyIgnoredRelativePath } = await loadStageRuntime()
+
+    await expect(resolveNodePtyIgnoredRelativePath(runtimeDirectory)).resolves.toMatch(
+      /^node_modules[\\/]\.pnpm[\\/]node-pty@[^\\/]+[\\/]node_modules[\\/]node-pty$/,
+    )
   })
 
   it('rejects any link in a Windows runtime that would require Developer Mode', async () => {
@@ -436,7 +434,7 @@ describe('desktop runtime staging', () => {
   })
 
   it('rejects an x86 PE hidden anywhere in the Windows runtime', async () => {
-    const repoRoot = await makeRepository()
+    const repoRoot = await realpath(await makeRepository())
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     const x86Binary = join(runtimeDirectory, 'node_modules/native/hidden.data')
     await mkdir(dirname(x86Binary), { recursive: true })
@@ -450,7 +448,7 @@ describe('desktop runtime staging', () => {
   })
 
   it('returns every x64 PE while ignoring ordinary files', async () => {
-    const repoRoot = await makeRepository()
+    const repoRoot = await realpath(await makeRepository())
     const runtimeDirectory = join(repoRoot, 'apps/desktop/.runtime')
     const x64Executable = join(runtimeDirectory, 'DeepSeek Harness.exe')
     const x64Addon = join(runtimeDirectory, 'node_modules/native/pty.node')
@@ -607,84 +605,6 @@ describe('desktop runtime staging', () => {
       },
     })).rejects.toThrow('Staged symlink resolves outside the runtime')
     expect(repairExecuted).toBe(false)
-  })
-
-  it('prunes sources, source maps, and rebuild debris while keeping runtime files', async () => {
-    const runtimeDirectory = await mkdtemp(join(tmpdir(), 'dsh-stage-prune-'))
-    directories.push(runtimeDirectory)
-    const kept = [
-      'node_modules/@deepseek-ai/dsh/lib/bin.js',
-      'node_modules/@deepseek-ai/dsh/lib/index.mjs',
-      'node_modules/dep/index.cjs',
-      'node_modules/dep/prebuilds/darwin-arm64/pty.node',
-    ]
-    const pruned = [
-      'node_modules/@deepseek-ai/dsh/src/index.ts',
-      'node_modules/@deepseek-ai/dsh/lib/index.mts',
-      'node_modules/dep/lib/legacy.cts',
-      'node_modules/dep/lib/index.d.ts',
-      'node_modules/dep/lib/index.js.map',
-      'node_modules/dep/build/Release/obj.target/pty.o',
-      'node_modules/dep/build/Release/pty.obj',
-    ]
-    for (const relative of [...kept, ...pruned]) {
-      const target = join(runtimeDirectory, relative)
-      await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, '')
-    }
-    const { pruneRuntimeSources } = await loadStageRuntime()
-
-    await expect(pruneRuntimeSources(runtimeDirectory)).resolves.toBe(pruned.length)
-    for (const relative of kept) {
-      await expect(readFile(join(runtimeDirectory, relative), 'utf8')).resolves.toBe('')
-    }
-    for (const relative of pruned) {
-      await expect(readFile(join(runtimeDirectory, relative), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    }
-  })
-
-  it('rejects a manifest whose runtime entry points at a pruned source file', async () => {
-    const runtimeDirectory = await mkdtemp(join(tmpdir(), 'dsh-stage-prune-entry-'))
-    directories.push(runtimeDirectory)
-    const { assertRuntimeNoPrunedEntries } = await loadStageRuntime()
-
-    const clean = join(runtimeDirectory, 'node_modules/clean')
-    await mkdir(clean, { recursive: true })
-    await writeFile(join(clean, 'package.json'), JSON.stringify({
-      name: 'clean',
-      main: './lib/index.js',
-      exports: {
-        '.': {
-          source: './src/index.ts',
-          types: './lib/index.d.ts',
-          import: './dist/index.js',
-          default: './dist/index.js',
-        },
-        './sub': { types: './src/sub.d.ts', import: './dist/sub.mjs' },
-      },
-    }))
-    await expect(assertRuntimeNoPrunedEntries(runtimeDirectory)).resolves.toBeUndefined()
-
-    const broken = join(runtimeDirectory, 'node_modules/broken')
-    await mkdir(broken, { recursive: true })
-    await writeFile(join(broken, 'package.json'), JSON.stringify({
-      name: 'broken',
-      exports: { '.': { import: './src/index.ts', default: './lib/index.js' } },
-    }))
-    await expect(assertRuntimeNoPrunedEntries(runtimeDirectory)).rejects.toThrow(
-      `Staged runtime entry points at a pruned source file: ${join(broken, 'package.json')} (entry ./src/index.ts)`,
-    )
-    await rm(broken, { recursive: true })
-
-    const binBroken = join(runtimeDirectory, 'node_modules/bin-broken')
-    await mkdir(binBroken, { recursive: true })
-    await writeFile(join(binBroken, 'package.json'), JSON.stringify({
-      name: 'bin-broken',
-      bin: { run: './src/cli.mts' },
-    }))
-    await expect(assertRuntimeNoPrunedEntries(runtimeDirectory)).rejects.toThrow(
-      `Staged runtime entry points at a pruned source file: ${join(binBroken, 'package.json')} (entry ./src/cli.mts)`,
-    )
   })
 
   it('mirrors the ConPTY assets beside a rebuilt win32 conpty.node', async () => {

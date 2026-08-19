@@ -1,6 +1,7 @@
 # Agent Note: Trim and measure the Desktop runtime payload
 
 Status: implemented
+Archived: 2026-08-19
 
 English | [中文](2026-08-18-desktop-runtime-payload-trim.zh.md)
 
