@@ -234,10 +234,13 @@ async function handleGitDiff(shell: DevPanelShell, body: DevPanelRequestBody, re
   sendJson(response, { ok: true, diff: result.result.stdout.text })
 }
 
+/** Services required by the review-panel host plugin. */
+export const inject = ['webServer', 'shell'] as const
+
 /**
  * Registers the four review-panel routes on the loopback Web server.
  *
- * @param ctx - Context carrying the Web server and shell services.
+ * @param ctx - Context carrying the injected Web server and shell services.
  * @returns The route registrations' combined disposer.
  */
 export function apply(ctx: Context): void {
