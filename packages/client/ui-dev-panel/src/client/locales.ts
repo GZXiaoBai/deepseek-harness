@@ -1,22 +1,6 @@
 /** Review panel dictionary namespace. */
 
-export interface DevPanelKey {
-  'panel.title': string
-  'panel.tabs.files': string
-  'panel.tabs.history': string
-  'panel.tabs.vcs': string
-  'panel.files.empty': string
-  'panel.files.preview': string
-  'panel.files.previewClose': string
-  'panel.files.previewError': string
-  'panel.history.empty': string
-  'panel.vcs.empty': string
-  'panel.vcs.diff': string
-  'panel.vcs.error': string
-  'panel.footer.open': string
-}
-
-export const zh: DevPanelKey = {
+export const zh = {
   'panel.title': '审查台',
   'panel.tabs.files': '文件',
   'panel.tabs.history': '历史',
@@ -32,7 +16,10 @@ export const zh: DevPanelKey = {
   'panel.footer.open': '审查台',
 }
 
-export const en: DevPanelKey = {
+/** Dictionary keys of the review panel namespace. */
+export type DevPanelKey = keyof typeof zh
+
+export const en: Record<DevPanelKey, string> = {
   'panel.title': 'Review Panel',
   'panel.tabs.files': 'Files',
   'panel.tabs.history': 'History',

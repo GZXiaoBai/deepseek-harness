@@ -23,15 +23,15 @@ async function bench(declare = true) {
           'sidebar': { kind: 'single', scope: 'root' },
           'details': { kind: 'single', scope: 'session' },
         },
-      },
+      } as never,
+      () => null,
+    ) as never
+    slots.register(
+      { name: 'sidebar', children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' } } } as never,
       () => null,
     )
     slots.register(
-      { name: 'sidebar', children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' } } },
-      () => null,
-    )
-    slots.register(
-      { name: 'details', children: { 'conversation.details.devpanel': { kind: 'single', scope: 'session' } } },
+      { name: 'details', children: { 'conversation.details.devpanel': { kind: 'single', scope: 'session' } } } as never,
       () => null,
     )
   }
@@ -54,7 +54,7 @@ describe('ui-dev-panel apply', () => {
   it('opens the details column through the trigger callback', async () => {
     const b = await bench()
     await b.ctx.plugin({ inject: [...inject], apply }).await()
-    const trigger = b.slots.entries('sidebar.footer.action')[0]!.inject as () => { openPanel: () => void }
+    const trigger = b.slots.entries('sidebar.footer.action')[0]!.inject as unknown as () => { openPanel: () => void }
 
     trigger().openPanel()
 
@@ -68,7 +68,7 @@ describe('ui-dev-panel apply', () => {
     }))
     vi.stubGlobal('fetch', fetchMock)
     await b.ctx.plugin({ inject: [...inject], apply }).await()
-    const panel = b.slots.entries('conversation.details.devpanel')[0]!.inject as () => ReviewPanelInjected
+    const panel = b.slots.entries('conversation.details.devpanel')[0]!.inject as unknown as () => ReviewPanelInjected
 
     const response = await panel().callPanel('/dev-panel.list-files', { root: '/workspace' })
 
@@ -96,15 +96,15 @@ describe('ui-dev-panel apply', () => {
           'sidebar': { kind: 'single', scope: 'root' },
           'details': { kind: 'single', scope: 'session' },
         },
-      },
+      } as never,
       () => null,
     )
     b.slots.register(
-      { name: 'sidebar', children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' } } },
+      { name: 'sidebar', children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' } } } as never,
       () => null,
     )
     b.slots.register(
-      { name: 'details', children: { 'conversation.details.devpanel': { kind: 'single', scope: 'session' } } },
+      { name: 'details', children: { 'conversation.details.devpanel': { kind: 'single', scope: 'session' } } } as never,
       () => null,
     )
     expect(b.slots.entries('sidebar.footer.action')).toHaveLength(1)

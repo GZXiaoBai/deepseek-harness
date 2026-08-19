@@ -3,14 +3,17 @@
  * panel (Files / History / Git), fed by the loopback host routes.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-// Type-only: pulls the locale plugin's Context merge (ctx.locale).
+// Type-only: pulls the locale, layout, sidebar, and conversation Context/SlotMap merges.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PanelResponse } from './contract/slots.ts'
 import { ReviewPanel } from './ReviewPanel.tsx'
 import { PanelTrigger } from './PanelTrigger.tsx'
 import { en, zh, type DevPanelKey } from './locales.ts'
 
-export type { PanelResponse } from './contract/slots.ts'
+export type { PanelResponse, ReviewPanelInjected } from './contract/slots.ts'
 export type { DevPanelKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

@@ -1,5 +1,7 @@
 /** Review panel browser-side contract: injected API face and locale keys. */
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls the conversation SlotMap merge (the details child seat).
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 /** Successful or failed host route response. */
 export type PanelResponse =
