@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-dev-panel",
   "description": "Loopback host half of the in-app review panel: workspace file listing/reading and read-only git status/diff",
-  "version": "0.1.0-rc.5",
+  "version": "0.1.0-rc.7",
   "publishConfig": {
     "access": "public"
   },
