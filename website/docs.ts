@@ -216,6 +216,14 @@ const develop = pairedPages([
     section: { root: '实战', en: 'Practice' },
     order: 2,
   },
+  {
+    source: 'docs/user/develop/practice/community-plugins.md',
+    route: 'develop/practice/community-plugins.md',
+    label: { root: '社区插件推荐', en: 'Community plugin picks' },
+    sidebar: { root: 'zh-develop', en: 'en-develop' },
+    section: { root: '实战', en: 'Practice' },
+    order: 3,
+  },
 ])
 
 const cordisTutorial = pairedPages(([

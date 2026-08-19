@@ -1,0 +1,31 @@
+# @deepseek-ai/dsh-host-dev-panel
+
+English | [中文](README.zh.md)
+
+Loopback host half of the in-app review panel: workspace file listing and reading, and read-only git status/diff. The browser panel (`@deepseek-ai/dsh-client-ui-dev-panel`) consumes four JSON routes on the loopback Web server:
+
+| Route | Request | Response |
+| --- | --- | --- |
+| `POST /dev-panel.list-files` | `{ root, path? }` | `{ ok, entries: [{ name, type, size }] }` |
+| `POST /dev-panel.read-file` | `{ root, file }` | `{ ok, content }` |
+| `POST /dev-panel.git-status` | `{ root }` | `{ ok, status }` |
+| `POST /dev-panel.git-diff` | `{ root, file? }` | `{ ok, diff }` |
+
+Every request names the workspace root the browser is browsing. Path confinement (`confineToWorkspace`) resolves links and rejects absolute paths, `..` escapes, and symlinks escaping the root; the root itself must be an existing real directory. File reading is read-only, UTF-8, and bounded at 512 KiB per file. Git commands run through the `ctx.shell` executor with the workspace as working directory, so the deployment's sandbox and policy apply; the panel issues only the read-only verbs `git status --porcelain` and `git diff`. The panel is a same-origin consumer of the loopback Web server, the same trust boundary as the rest of the Web UI.
+
+## Config
+
+None.
+
+## Model Experience
+
+None: the panel renders workspace and git state in the browser and never reaches a model request.
+
+#### KV Cache effect
+
+None; this package neither assembles nor sends a provider request.
+
+## Known Limitations and Deferred Work
+
+- **The workspace root is client-supplied** — a compromised page could browse any directory it names; containment prevents escape outside the named root, and the root is the session workspace the UI already shows.
+- **No write operations** — creating files or staging git changes is out of scope for the review panel.

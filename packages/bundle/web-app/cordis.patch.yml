@@ -96,6 +96,10 @@
     - id: directory-picker
       name: '@deepseek-ai/dsh-host-directory-picker-auto'
 
+    # Loopback host half of the in-app review panel (files + read-only git).
+    - id: dev-panel
+      name: '@deepseek-ai/dsh-host-dev-panel'
+
     # Read-only projection of current Loader entries for trusted client RPCs.
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
@@ -293,6 +297,9 @@
 
     - id: ui-trajectory
       name: '@deepseek-ai/dsh-client-ui-trajectory'
+
+    - id: ui-dev-panel
+      name: '@deepseek-ai/dsh-client-ui-dev-panel'
 
 # ── the agent plane moves behind agent presets ─────────────────────────────
 #
