@@ -5,6 +5,7 @@ import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertRuntimeSymlinksContained, resolveCliEntryPath, resolveWebFrontendIndex } from './stage-runtime.mjs'
 import { auditArm64MachO } from './macho-audit.mjs'
+import { resolveNodePtyIgnoredRelativePath } from './stage-runtime.mjs'
 import { requireClosedTcpPort } from './process-group.mjs'
 
 const PRODUCT_NAME = 'DeepSeek Harness'
@@ -139,7 +140,9 @@ async function verifyAppBundle(appPath) {
   if (plist.CFBundleExecutable !== PRODUCT_NAME) throw new Error(`Unexpected bundle executable: ${String(plist.CFBundleExecutable)}`)
   if (plist.LSMinimumSystemVersion !== '14.0') throw new Error(`Unexpected minimum macOS version: ${String(plist.LSMinimumSystemVersion)}`)
 
-  const machOFiles = await auditArm64MachO(appPath)
+  const runtimeDirectory = join(appPath, 'Contents/Resources/runtime')
+  const nodePtyIgnored = await resolveNodePtyIgnoredRelativePath(runtimeDirectory)
+  const machOFiles = await auditArm64MachO(appPath, { ignoredRelativePaths: [join('Contents', 'Resources', 'runtime', nodePtyIgnored)] })
   if (machOFiles.length === 0) throw new Error('Packaged App contains no Mach-O binaries')
   await verifyAppCodeSignatures(appPath, machOFiles)
 

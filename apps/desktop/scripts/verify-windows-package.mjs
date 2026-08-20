@@ -451,7 +451,10 @@ async function verifyWindowsLaunch(executable, userData, cwd) {
     }
 
     await closeMainWindow(primary.pid)
-    const primaryResult = await waitForExit(primaryExit, SHUTDOWN_TIMEOUT_MS, 'Primary Windows App did not close')
+    const primaryResult = await waitForExit(primaryExit, SHUTDOWN_TIMEOUT_MS, 'Primary Windows App did not close').catch(async (error) => {
+      await diagnoseStuckClose(primary.pid, join(userData, 'Logs/desktop.log'))
+      throw error
+    })
     if (primaryResult.code !== 0 || primaryResult.signal !== null) {
       throw new Error(`Primary Windows App did not quit cleanly (${describeExit(primaryResult)})`)
     }
@@ -769,6 +772,22 @@ async function run(executable, args, options = {}) {
       rejectRun(new Error(`${executable} ${args.join(' ')} failed (${describeExit({ code, signal })}): ${stderr.trim()}`))
     })
   })
+}
+
+/** Dumps process and desktop-log state when the primary app fails to close. */
+async function diagnoseStuckClose(pid, logPath) {
+  const script = [
+    `$p = Get-Process -Id ${String(pid)} -ErrorAction SilentlyContinue`,
+    'if ($null -eq $p) { "process-gone" } else { "pid=$($p.Id) title=[$($p.MainWindowTitle)] responding=$($p.Responding) threads=$($p.Threads.Count)" }',
+    `tasklist /FI "PID eq ${String(pid)}" /FO CSV`,
+    `if (Test-Path '${logPath}') { Get-Content -Tail 25 '${logPath}' } else { "no-desktop-log" }`,
+  ].join('; ')
+  try {
+    const diag = await runPowerShell(script)
+    console.error(`close-diagnosis: ${diag.stdout}`)
+  } catch (diagError) {
+    console.error(`close-diagnosis failed: ${errorMessage(diagError)}`)
+  }
 }
 
 function isolatedEnvironment() {
