@@ -24,7 +24,7 @@ describe('Desktop runtime dependency closure', () => {
     expect(result.error).toBeUndefined()
     expect(result.status, output).toBe(0)
     expect(result.stdout).toMatch(
-      /@deepseek-ai\/dsh-desktop-runtime: [1-9][0-9]* workspace packages form a closed runtime dependency graph\./,
+      /verify-runtime-closure: [1-9][0-9]* agent presets and [1-9][0-9]* workspace packages form a closed runtime dependency graph\./,
     )
   })
 
@@ -51,10 +51,7 @@ describe('Desktop runtime dependency closure', () => {
 
       expect(result.error).toBeUndefined()
       expect(result.status, output).not.toBe(0)
-      expect(output).toContain(
-        '@deepseek-ai/dsh-runtime-closure-negative -> @deepseek-ai/dsh -> '
-        + '@deepseek-ai/dsh-app-boot -> @deepseek-ai/cordis-plugin-group',
-      )
+      expect(output).toContain('preset plugins or required workspace peers are missing')
     } finally {
       await rm(directory, { recursive: true })
     }
