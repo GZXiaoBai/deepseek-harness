@@ -277,6 +277,7 @@ async function createOptions(adapter: TestAdapter, harness: TestHarness) {
     startupDocument: join(userDataPath, 'startup.html'),
     errorDocument: join(userDataPath, 'error.html'),
     userDataPath,
+    logger: { log: () => {} },
   }
 }
 

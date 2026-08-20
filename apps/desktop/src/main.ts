@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
-import { DesktopLogger } from './desktop-logger.ts'
+import { DesktopLogger, type DesktopLogSink } from './desktop-logger.ts'
 import { resolveDesktopTarget } from './desktop-target.ts'
 import { HarnessProcessController } from './harness-process.ts'
 import { buildChildEnvironment } from './login-path.ts'
@@ -117,6 +117,7 @@ export interface ApplicationControllerOptions {
   startupDocument: string
   errorDocument: string
   userDataPath: string
+  logger: DesktopLogSink
   /** Update service; absent in unpackaged development runs. */
   updater?: DesktopUpdater
   /** Download directory for update artifacts. */
@@ -240,6 +241,7 @@ export class ApplicationController {
   readonly #settingsPath: string
   readonly #updater: DesktopUpdater | undefined
   readonly #updateDownloadDirectory: string
+  readonly #logger: DesktopLogSink
   #settings: DesktopSettings = structuredClone(DEFAULT_DESKTOP_SETTINGS)
   #window: DesktopWindow | undefined
   #harnessOrigin: string | undefined
@@ -261,6 +263,7 @@ export class ApplicationController {
     this.#logsDirectory = join(options.userDataPath, LOG_DIRECTORY)
     this.#windowStatePath = join(options.userDataPath, WINDOW_STATE_FILE)
     this.#settingsPath = join(options.userDataPath, SETTINGS_FILE)
+    this.#logger = options.logger
     this.#updater = options.updater
     this.#updateDownloadDirectory = options.updateDownloadDirectory ?? join(tmpdir(), 'dsh-desktop-updates')
   }
@@ -421,6 +424,7 @@ export class ApplicationController {
     this.#harnessOrigin = url.origin
     try {
       await window.loadUrl(url.href)
+      this.#logger.log('ui-ready', { url: url.href })
     } catch (error) {
       if (this.#isShuttingDown()) return
       if (
@@ -843,6 +847,7 @@ async function runElectronMain(): Promise<void> {
       startupDocument: fileURLToPath(new URL('../static/startup.html', import.meta.url)),
       errorDocument: fileURLToPath(new URL('../static/error.html', import.meta.url)),
       userDataPath,
+      logger,
       ...(updater === undefined ? {} : { updater }),
     })
   })

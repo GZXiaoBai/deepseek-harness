@@ -168,8 +168,8 @@ export async function verifyWindowsPackage() {
   const unpackedStats = await summarizeTree(plan.unpackedDirectory)
   const installerBytes = (await stat(installer)).size
   await verifyStandaloneWindowsLaunch(plan.unpackedDirectory)
-  const { installMs, uninstallMs } = await verifyInstalledWindowsPackage(installer)
-  const stats = { installerBytes, appFiles: unpackedStats.files, appBytes: unpackedStats.bytes, installMs, uninstallMs }
+  const { installMs, uninstallMs, startupMs } = await verifyInstalledWindowsPackage(installer)
+  const stats = { installerBytes, appFiles: unpackedStats.files, appBytes: unpackedStats.bytes, installMs, uninstallMs, startupMs }
   await writeFile(join(plan.releaseDirectory, 'verify-stats.json'), `${JSON.stringify(stats)}\n`)
   console.log(`Windows package stats: ${JSON.stringify(stats)}`)
   console.log(`Windows unpacked package verification passed: ${plan.unpackedDirectory}`)
@@ -196,7 +196,7 @@ async function verifyStandaloneWindowsLaunch(sourceDirectory) {
  * Runs the silent per-user NSIS acceptance and returns install and uninstall durations.
  *
  * @param {string} installer NSIS installer path.
- * @returns {Promise<{ installMs: number, uninstallMs: number }>} Silent install and uninstall durations in milliseconds.
+ * @returns {Promise<{ installMs: number, uninstallMs: number, startupMs: number }>} Silent install, uninstall, and backend startup durations in milliseconds.
  */
 async function verifyInstalledWindowsPackage(installer) {
   const localAppData = requiredEnvironment('LOCALAPPDATA')
@@ -229,7 +229,7 @@ async function verifyInstalledWindowsPackage(installer) {
     await requireUnsigned(layout.executable)
     await requireUnsigned(installedPaths.uninstaller)
     await verifyPackagedWin32DialogWorker(layout)
-    await verifyWindowsLaunch(layout.executable, userData, acceptanceRoot)
+    const startupMs = await verifyWindowsLaunch(layout.executable, userData, acceptanceRoot)
 
     await mkdir(paths.userData, { recursive: true })
     await writeFile(preservationMarker, 'preserve')
@@ -243,7 +243,7 @@ async function verifyInstalledWindowsPackage(installer) {
     ], SHUTDOWN_TIMEOUT_MS)
     const uninstallMs = Date.now() - uninstallStarted
     await requireOrdinaryFile(preservationMarker, 'NSIS uninstall removed preserved application data')
-    return { installMs, uninstallMs }
+    return { installMs, uninstallMs, startupMs }
   } finally {
     if (installed && installedPaths !== undefined) {
       try {
@@ -415,7 +415,11 @@ export async function runPackagedWin32DialogCloser(
   )
 }
 
-/** @param {string} executable @param {string} userData @param {string} cwd */
+/**
+ * Runs one full packaged launch (backend start, page check, second-instance handoff, clean quit).
+ * @param {string} executable @param {string} userData @param {string} cwd
+ * @returns {Promise<number>} Backend startup duration (harness-starting to harness-ready) in milliseconds.
+ */
 async function verifyWindowsLaunch(executable, userData, cwd) {
   await mkdir(userData, { recursive: true })
   const environment = isolatedEnvironment()
@@ -454,6 +458,7 @@ async function verifyWindowsLaunch(executable, userData, cwd) {
     await requireProcessGone(backendPid, SHUTDOWN_TIMEOUT_MS)
     await requireClosedTcpPort(readyUrl, { timeoutMs: 5_000 })
     primary = undefined
+    return initial.startupMs
   } finally {
     if (primary?.pid !== undefined) {
       const exit = observeExit(primary)
@@ -544,7 +549,12 @@ async function readLifecycleSnapshot(logPath) {
   const ready = entries.findLast(entry => entry?.event === 'harness-ready')
   const url = parseReadyUrl(ready?.url)
   if (url === undefined) throw new Error('Desktop log is missing a strict loopback ready URL')
-  return { backendPid: lastStart.pid, url, startCount: starts.length }
+  const startingAt = Date.parse(lastStart.timestamp)
+  const readyAt = Date.parse(ready.timestamp)
+  if (!Number.isFinite(startingAt) || !Number.isFinite(readyAt) || readyAt < startingAt) {
+    throw new Error('Desktop log is missing valid harness-starting/harness-ready timestamps')
+  }
+  return { backendPid: lastStart.pid, url, startCount: starts.length, startupMs: readyAt - startingAt }
 }
 
 /** @param {string} logPath @param {number} timeoutMs */

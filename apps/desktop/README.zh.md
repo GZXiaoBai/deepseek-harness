@@ -21,7 +21,7 @@
 
 macOS 个人构建使用带 Hardened Runtime 的 ad-hoc 签名，但未经公证。Gatekeeper 可能会阻止首次启动被隔离的应用。请先尝试打开应用；macOS 阻止后，打开「系统设置 > 隐私与安全性」，点击「仍要打开」，再确认「打开」。当前恢复步骤以 Apple 的[打开来自未识别开发者的 Mac 应用](https://support.apple.com/guide/mac-help/mh40616/mac)指南为准。请勿在系统范围内禁用 Gatekeeper。
 
-在 Windows 上，请运行 `DeepSeek Harness Setup <version>-x64.exe`。向导式 NSIS 安装程序默认为当前用户安装且不请求提权，允许选择安装目录，并会创建桌面和开始菜单快捷方式；安装完成后不会启动应用。暂存阶段会从随包分发的运行时中剔除 TypeScript 源码与 source map，安装文件数大致减半；在启用实时杀毒扫描的机器上，首次安装仍可能需要几分钟。运行更新版本的安装程序即可更新。卸载会移除应用与快捷方式，但保留 Harness 用户数据。
+在 Windows 上，请运行 `DeepSeek Harness Setup <version>-x64.exe`。向导式 NSIS 安装程序默认为当前用户安装且不请求提权，允许选择安装目录，并会创建桌面和开始菜单快捷方式；安装完成后不会启动应用。随包分发的运行时完整保留（不剥离源码），在启用实时杀毒扫描的机器上，首次安装与冷启动仍可能需要几分钟，因为安装程序要写入数万个小文件。若希望加快安装与首次启动，可将安装目录（`%LOCALAPPDATA%\Programs\...`）与 Harness 数据目录（`%APPDATA%\DeepSeek Harness`）加入 Microsoft Defender 排除列表（Windows 安全中心 > 病毒和威胁防护 > 管理设置 > 排除项）。这只会关闭应用文件的实时扫描；请仅在可信的机器上使用。运行更新版本的安装程序即可更新。卸载会移除应用与快捷方式，但保留 Harness 用户数据。
 
 Windows 个人构建有意保持未签名，因此 Microsoft Defender SmartScreen 可能显示「Windows 已保护你的电脑」。仅当安装程序来自你信任且已核验的来源时，才选择「仍要运行」；企业策略可能不提供该选项。请遵循 Microsoft 当前的 [SmartScreen 信誉指南](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)。请勿在系统范围内禁用 Microsoft Defender 或 SmartScreen。
 
@@ -45,6 +45,6 @@ pnpm --filter @deepseek-ai/dsh-desktop run verify:package
 
 macOS 验证器会验证发布 App，启动仓库外的副本，并对已挂载 DMG 中的 App 重新进行静态验证。它检查 Web UI、单实例交接、隔离的 Harness 数据、进程与端口清理、运行时包含性、arm64 Mach-O 文件、ad-hoc Hardened Runtime 签名和 entitlements。`spctl` 拒绝这个有意未经公证的个人构建属于预期结果。
 
-Windows 验证器会同时验证 `win-unpacked` 与静默安装的当前用户 NSIS 版本。它检查运行时没有符号链接、junction 或其他 reparse point；应用负载中的每个 PE 文件均为 x64；标准 NSIS 卸载程序是已安装根目录下唯一经过审查的 x86 PE，且 COFF machine 固定为 `0x014c`；应用、安装程序和卸载程序均为 `NotSigned`；随包原生文件夹弹窗 worker 会打开真实弹窗，并在验证器关闭弹窗后报告取消终态；回环 HTTP 与现有页面标题正常；第二次启动保留原后端；关闭窗口会移除所拥有的进程树和监听器；安装会创建开始菜单和桌面快捷方式；卸载会移除程序文件与快捷方式，但保留 Harness 数据。验证器还会记录静默安装耗时，并把安装程序体积、应用文件数与字节总数写入 `apps/desktop/release/verify-stats.json`，CI 工作流打印该文件作为安装耗时的回归信号。
+Windows 验证器会同时验证 `win-unpacked` 与静默安装的当前用户 NSIS 版本。它检查运行时没有符号链接、junction 或其他 reparse point；应用负载中的每个 PE 文件均为 x64；标准 NSIS 卸载程序是已安装根目录下唯一经过审查的 x86 PE，且 COFF machine 固定为 `0x014c`；应用、安装程序和卸载程序均为 `NotSigned`；随包原生文件夹弹窗 worker 会打开真实弹窗，并在验证器关闭弹窗后报告取消终态；回环 HTTP 与现有页面标题正常；第二次启动保留原后端；关闭窗口会移除所拥有的进程树和监听器；安装会创建开始菜单和桌面快捷方式；卸载会移除程序文件与快捷方式，但保留 Harness 数据。验证器还会记录静默安装耗时、静默卸载耗时与后端启动耗时（harness-starting 到 harness-ready），并把安装程序体积、应用文件数、字节总数与这三项耗时写入 `apps/desktop/release/verify-stats.json`，CI 工作流打印该文件作为安装与启动耗时的回归信号。
 
 GitHub Windows Server 2025 工作流是自动打包门禁。首次发布 Windows 版本前，还必须在真实 Windows 11 x64 电脑上运行同一安装程序与验证器，并单独记录结果；Server 2025 CI 不能作为 Windows 11 验收证据。

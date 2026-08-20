@@ -158,6 +158,9 @@ function isOwnedGroupAlive(options, signalProcess) {
     return true
   } catch (error) {
     if (error.code === 'ESRCH') return false
+    // macOS reports EPERM for a negative pid whose process group was already
+    // reaped or reused; the leader check disambiguates a real permission error.
+    if (error.code === 'EPERM' && !isLeaderAlive(options, signalProcess)) return false
     throw error
   }
 }

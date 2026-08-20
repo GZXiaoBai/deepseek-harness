@@ -608,9 +608,7 @@ describe('DetailsPanel Output section', () => {
     const view = mount(snapshot({
       nodes: [settled({ call: null, callView: null, resultView: resultTerminal({ title: 'ls -la' }) })],
     }), target)
-    // The tabbed details column shows the Tool Details tab with its tabs; the
-    // callId-title fallback is gone with the old single-panel title.
-    expect(view.getByText('工具详情')).toBeTruthy()
+    expect(view.getByText('c1')).toBeTruthy()
     expect(view.queryByText('输入')).toBeNull()
     expect(view.getByText('输出')).toBeTruthy()
   })
@@ -626,15 +624,15 @@ describe('DetailsPanel Output section', () => {
     expect(view.getByText('该调用不在当前窗口内')).toBeTruthy()
   })
 
-  it('no selection at all lands on the Review Panel tab with its fallback', () => {
+  it('no selection at all renders the guidance line and the default title', () => {
     const view = mount(snapshot(), null)
-    expect(view.getByText('审查台')).toBeTruthy()
+    expect(view.getByText('详情')).toBeTruthy()
     expect(view.getByText('点击消息流中的工具行查看详情')).toBeTruthy()
   })
 
-  it('a step selection without a callId stays on the Review Panel tab', () => {
+  it('a step selection without a callId renders the guidance line too', () => {
     const view = mount(snapshot(), { turnSeq: 3, stepSeq: 1 })
-    expect(view.getByText('审查台')).toBeTruthy()
+    expect(view.getByText('点击消息流中的工具行查看详情')).toBeTruthy()
   })
 
   it('the close button reaches closeDetails', () => {

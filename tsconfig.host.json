@@ -297,7 +297,6 @@
     { "path": "./packages/host/apiproxy" },
     { "path": "./packages/host/directory-picker" },
     { "path": "./packages/host/directory-picker-auto" },
-    { "path": "./packages/host/dev-panel" },
     { "path": "./packages/host/directory-picker-browse" },
     { "path": "./packages/host/directory-picker-native" },
     { "path": "./packages/host/frontend-static" },

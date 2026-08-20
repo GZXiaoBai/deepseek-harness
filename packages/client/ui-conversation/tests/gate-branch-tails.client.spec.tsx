@@ -146,8 +146,7 @@ describe('render branch tails', () => {
         t={t}
       />,
     )
-    expect(view.getByText('工具详情')).toBeTruthy()
-    expect(view.getByText('审查台')).toBeTruthy()
+    expect(view.getByText('详情')).toBeTruthy()
     expect(view.getByText('该调用不在当前窗口内')).toBeTruthy()
   })
 
@@ -206,7 +205,7 @@ describe('render branch tails', () => {
     )
     // Conversation resolves the selected sub-call and hands its complete
     // frozen block to the Tool-owned details seat.
-    expect(view.getByText('输入')).toBeTruthy()
+    expect(view.getByText('read')).toBeTruthy()
     expect(view.getByTestId('tool-details-seat')).toBeTruthy()
     expect(owners).toHaveLength(1)
     expect(owners[0]?.block).toMatchObject({

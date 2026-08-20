@@ -6,7 +6,7 @@
 // share the store seat exists for) and derives the call material from the
 // session snapshot — no data of its own.
 
-import { Fragment, useEffect, useState, type JSX } from 'react'
+import { Fragment } from 'react'
 import { CodeBlock } from '@deepseek-ai/dsh-client-ui-primitives'
 import { shallowEqual } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConversationSnapshot, RunningToolCall, ToolCallBlock, ToolResultNode } from '@deepseek-ai/dsh-client-runtime/client'
@@ -63,73 +63,8 @@ function rawResultText(block: ToolCallBlock): string {
   return parts.join('\n')
 }
 
-/** Details-column tab: Tool Details | Review Panel. */
-type DetailsTab = 'tool' | 'panel'
-
-export function DetailsPanel(props: DetailsPanelProps) {
-  const { useSession, useSessions, sessionId, useStore, renderSlot, closeDetails, t } = props
+export function DetailsPanel({ useSession, useSessions, sessionId, useStore, renderSlot, closeDetails, t }: DetailsPanelProps) {
   const selection = useStore(s => s.selection)
-  const callId = selection?.callId
-  const [tab, setTab] = useState<DetailsTab>(callId === undefined ? 'panel' : 'tool')
-  // A selected tool call owns the panel until the user picks another tab.
-  useEffect(() => {
-    if (callId !== undefined) setTab('tool')
-  }, [callId])
-
-  return (
-    <div className={css.root}>
-      <div className={css.header}>
-        <div className={css.tabs}>
-          <button
-            type="button" className={tab === 'tool' ? css.tabActive : css.tab}
-            onClick={() => { setTab('tool') }}
-          >
-            {t('details.tab.tool')}
-          </button>
-          <button
-            type="button" className={tab === 'panel' ? css.tabActive : css.tab}
-            onClick={() => { setTab('panel') }}
-          >
-            {t('details.tab.panel')}
-          </button>
-        </div>
-        <button
-          type="button" className={css.close} aria-label={t('details.close')}
-          onClick={() => { closeDetails() }}
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
-            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
-      {tab === 'tool'
-        ? (
-          <ToolDetails
-            useSession={useSession} useSessions={useSessions} sessionId={sessionId}
-            selection={selection} renderSlot={renderSlot} t={t}
-          />
-        )
-        : (
-          <div className={css.body}>
-            {renderSlot('conversation.details.devpanel', {}, {
-              fallback: <div className={css.empty}>{t('details.empty')}</div>,
-            })}
-          </div>
-        )}
-    </div>
-  )
-}
-
-/** Tool-call details: the selected call's args and result. */
-function ToolDetails(props: {
-  useSession: DetailsPanelProps['useSession']
-  useSessions: DetailsPanelProps['useSessions']
-  sessionId: DetailsPanelProps['sessionId']
-  selection: { callId?: string } | null
-  renderSlot: DetailsPanelProps['renderSlot']
-  t: DetailsPanelProps['t']
-}): JSX.Element {
-  const { useSession, useSessions, sessionId, selection, renderSlot, t } = props
   // Session workspace root: an omitted or relative terminal cwd resolves
   // against it, which the pure presenter cannot see.
   const sessionCwd = useSessions(list => list.byId[sessionId]?.cwd)
@@ -141,39 +76,54 @@ function ToolDetails(props: {
     (a, b) => shallowEqual(a, b))
 
   return (
-    <div className={css.body}>
-      {selection === null || callId === undefined
-        ? <div className={css.empty}>{t('details.empty')}</div>
-        : material === null
-          ? <div className={css.empty}>{t('details.notInWindow')}</div>
-          : (
-            <>
-              {material.argsRaw !== null && (
+    <div className={css.root}>
+      <div className={css.header}>
+        <div className={css.title}>
+          {selection === null ? t('details.title') : material?.name ?? selection.toolName ?? t('details.title')}
+        </div>
+        <button
+          type="button" className={css.close} aria-label={t('details.close')}
+          onClick={() => { closeDetails() }}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      <div className={css.body}>
+        {selection === null || callId === undefined
+          ? <div className={css.empty}>{t('details.empty')}</div>
+          : material === null
+            ? <div className={css.empty}>{t('details.notInWindow')}</div>
+            : (
+              <>
+                {material.argsRaw !== null && (
+                  <section className={css.section}>
+                    <div className={css.sectionLabel}>{t('details.input')}</div>
+                    <CodeBlock code={pretty(material.argsRaw)} lang="json" copyLabel={t('copy')} copiedLabel={t('copied')} />
+                  </section>
+                )}
                 <section className={css.section}>
-                  <div className={css.sectionLabel}>{t('details.input')}</div>
-                  <CodeBlock code={pretty(material.argsRaw)} lang="json" copyLabel={t('copy')} copiedLabel={t('copied')} />
-                </section>
-              )}
-              <section className={css.section}>
-                <div className={css.sectionLabel}>{t('details.output')}</div>
-                {/* Keyed by the selected call: the body owns per-call view
+                  <div className={css.sectionLabel}>{t('details.output')}</div>
+                  {/* Keyed by the selected call: the body owns per-call view
                       state (the terminal card's expand and copy), which React
                       would otherwise carry into the next selection because the
                       panel does not unmount between calls. */}
-                <Fragment key={callId}>
-                  {renderSlot('conversation.details.tool', { block: material.block, cwd: sessionCwd }, {
-                    fallback: 'kind' in material.block
-                      ? (
-                        <pre className={css.code} data-error={material.block.isError || undefined}>
-                          {rawResultText(material.block)}
-                        </pre>
-                      )
-                      : <div className={css.empty}>{t('details.running')}</div>,
-                  })}
-                </Fragment>
-              </section>
-            </>
-          )}
+                  <Fragment key={callId}>
+                    {renderSlot('conversation.details.tool', { block: material.block, cwd: sessionCwd }, {
+                      fallback: 'kind' in material.block
+                        ? (
+                          <pre className={css.code} data-error={material.block.isError || undefined}>
+                            {rawResultText(material.block)}
+                          </pre>
+                        )
+                        : <div className={css.empty}>{t('details.running')}</div>,
+                    })}
+                  </Fragment>
+                </section>
+              </>
+            )}
+      </div>
     </div>
   )
 }
