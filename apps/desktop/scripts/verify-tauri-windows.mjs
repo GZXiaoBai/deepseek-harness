@@ -160,8 +160,13 @@ async function verifyLaunch(executable, cwd) {
   let lifecycle
   try {
     primary = launch(executable, cwd, userData)
+    const primaryOutput = captureOutput(primary)
     const primaryExit = observeExit(primary)
-    lifecycle = await waitForLifecycle(userData)
+    lifecycle = await waitForTauriLifecycleOrExit(
+      waitForLifecycle(userData),
+      primaryExit,
+      primaryOutput,
+    )
     await requirePage(lifecycle.url, userData)
     await requireFile(join(userData, 'Harness/profiles/web/cordis.yml'), 'Packaged Web profile was not initialized')
     const initialStats = await waitForPerformance(userData, false)
@@ -240,6 +245,32 @@ function launch(executable, cwd, userData) {
   })
   if (child.pid === undefined) throw new Error('Tauri application did not create a process')
   return child
+}
+
+/** Rejects with native process output when the Tauri shell exits before sidecar readiness. */
+export async function waitForTauriLifecycleOrExit(lifecycle, exit, output) {
+  return await Promise.race([
+    lifecycle,
+    exit.then((result) => {
+      const captured = output()
+      const status = result.signal ?? `exit code ${result.code}`
+      throw new Error(
+        `Tauri application exited before sidecar readiness with ${status}`
+        + `\nstdout:\n${captured.stdout.trim() || '<empty>'}`
+        + `\nstderr:\n${captured.stderr.trim() || '<empty>'}`,
+      )
+    }),
+  ])
+}
+
+function captureOutput(child) {
+  let stdout = ''
+  let stderr = ''
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
+  child.stdout.on('data', chunk => { stdout += chunk })
+  child.stderr.on('data', chunk => { stderr += chunk })
+  return () => ({ stdout, stderr })
 }
 
 async function waitForLifecycle(userData) {

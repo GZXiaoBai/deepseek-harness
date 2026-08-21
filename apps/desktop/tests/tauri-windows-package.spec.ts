@@ -11,6 +11,11 @@ const verifier = await import(
   createTauriWindowsVerifyPlan: (input: { desktopRoot: string; platform: string; arch: string }) => Record<string, string>
   findTauriNsisInstaller: (releaseDirectory: string) => Promise<string>
   parseTauriDesktopLifecycle: (text: string) => { pid: number; startCount: number; url: URL }
+  waitForTauriLifecycleOrExit: <T>(
+    lifecycle: Promise<T>,
+    exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
+    output: () => { stdout: string; stderr: string },
+  ) => Promise<T>
   validatePerformanceStats: <T>(value: T, pageLoadLimitMs: number) => T
 }
 
@@ -19,6 +24,7 @@ const {
   createTauriWindowsVerifyPlan,
   findTauriNsisInstaller,
   parseTauriDesktopLifecycle,
+  waitForTauriLifecycleOrExit,
   validatePerformanceStats,
 } = verifier
 
@@ -72,6 +78,15 @@ describe('Tauri Windows package verification', () => {
     ].join('\n')
     expect(parseTauriDesktopLifecycle(log)).toEqual({ pid: 1234, startCount: 1, url: new URL('http://127.0.0.1:43210/') })
     expect(() => parseTauriDesktopLifecycle(log.replace('127.0.0.1', 'localhost'))).toThrow(/strict loopback/)
+  })
+
+  it('reports process output when the native shell exits before creating its log', async () => {
+    const lifecycle = new Promise<never>(() => {})
+    await expect(waitForTauriLifecycleOrExit(
+      lifecycle,
+      Promise.resolve({ code: 101, signal: null }),
+      () => ({ stdout: 'native stdout', stderr: 'webview startup failed' }),
+    )).rejects.toThrow(/exit code 101[\s\S]*native stdout[\s\S]*webview startup failed/)
   })
 
   it('enforces the CI page-ready threshold and graceful exit', async () => {
