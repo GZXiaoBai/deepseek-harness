@@ -1,4 +1,6 @@
 import type { ResolveHookContext } from 'node:module'
+import { join, parse } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   createDesktopModuleMappings,
@@ -7,6 +9,8 @@ import {
   resolveDesktopShippedPresetRoot,
 } from '../src/sidecar-module-resolver.ts'
 import { isPackagedDesktopSidecar } from '../src/sidecar-packaged-modules.ts'
+
+const snapshotRoot = join(parse(process.cwd()).root, 'snapshot')
 
 describe('desktop sidecar module resolver', () => {
   it('recognizes an injected roster even when runtime SEA markers are absent', () => {
@@ -33,30 +37,30 @@ describe('desktop sidecar module resolver', () => {
   it('maps package manifests through direct Node exports and the SEA package-root fallback', () => {
     const resolveModule = (specifier: string): string => {
       if (specifier === '@deepseek-ai/cordis/package.json') {
-        return 'file:///snapshot/node_modules/@deepseek-ai/cordis/package.json'
+        return pathToFileURL(join(snapshotRoot, 'node_modules', '@deepseek-ai/cordis', 'package.json')).href
       }
       if (specifier === '@deepseek-ai/dsh-client-runtime/package.json') {
         throw new Error('dynamic package manifest is absent from the SEA resolver table')
       }
-      return `file:///snapshot/node_modules/${specifier}/lib/index.js`
+      return pathToFileURL(join(snapshotRoot, 'node_modules', specifier, 'lib/index.js')).href
     }
 
     expect([...createDesktopPackageJsonMappings([
       '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-client-runtime',
     ], resolveModule)]).toEqual([
-      ['@deepseek-ai/cordis', '/snapshot/node_modules/@deepseek-ai/cordis/package.json'],
-      ['@deepseek-ai/dsh-client-runtime', '/snapshot/node_modules/@deepseek-ai/dsh-client-runtime/package.json'],
+      ['@deepseek-ai/cordis', join(snapshotRoot, 'node_modules', '@deepseek-ai/cordis', 'package.json')],
+      ['@deepseek-ai/dsh-client-runtime', join(snapshotRoot, 'node_modules', '@deepseek-ai/dsh-client-runtime', 'package.json')],
     ])
   })
 
   it('anchors shipped Agent presets at the packaged CLI manifest instead of the SEA entry URL', () => {
     const manifests = new Map([
-      ['@deepseek-ai/dsh', '/snapshot/node_modules/@deepseek-ai/dsh/package.json'],
+      ['@deepseek-ai/dsh', join(snapshotRoot, 'node_modules', '@deepseek-ai/dsh', 'package.json')],
     ])
 
     expect(resolveDesktopShippedPresetRoot(manifests))
-      .toBe('/snapshot/node_modules/@deepseek-ai/dsh/config/agent-presets')
+      .toBe(join(snapshotRoot, 'node_modules', '@deepseek-ai/dsh', 'config/agent-presets'))
     expect(() => resolveDesktopShippedPresetRoot(new Map()))
       .toThrow('packaged @deepseek-ai/dsh manifest')
   })
