@@ -87,7 +87,7 @@ export async function terminateWindowsProcessTree(
  * @returns Backend-only process arguments.
  */
 export function buildHarnessBackendArgs(cliPath: string, environment: NodeJS.ProcessEnv): string[] {
-  const args = [cliPath, 'web', '--host', '127.0.0.1', '--port', '0']
+  const args = [cliPath, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open']
   return environment.ELECTRON_RUN_AS_NODE === '1' ? ['--expose-internals', ...args] : args
 }
 

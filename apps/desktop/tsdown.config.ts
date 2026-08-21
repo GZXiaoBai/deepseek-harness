@@ -1,8 +1,13 @@
 import { defineConfig } from 'tsdown'
 
-/** Bundle Electron's compiled main-process entry without emitting declarations. */
+/** Bundle the transitional Electron entry and the Tauri sidecar entries. */
 export default defineConfig({
-  entry: ['lib/types/main.js'],
+  entry: [
+    'lib/types/main.js',
+    'lib/types/sidecar-bin.js',
+    'lib/types/sidecar-directory-picker.js',
+    'lib/types/sidecar-feasibility.js',
+  ],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',
@@ -10,5 +15,8 @@ export default defineConfig({
   fixedExtension: false,
   dts: false,
   clean: false,
-  deps: { neverBundle: ['electron'] },
+  deps: {
+    alwaysBundle: ['@deepseek-ai/dsh/profile-boot'],
+    neverBundle: ['electron'],
+  },
 })

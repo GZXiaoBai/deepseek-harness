@@ -2,49 +2,48 @@
 
 [English](README.md) | 中文
 
-本包用于在搭载 macOS 14 或更高版本的 Apple Silicon Mac，以及 Windows 11 x64 电脑上构建个人使用的 DeepSeek Harness 桌面应用。两个目标都保留现有 Web UI，并在 `http://127.0.0.1:<ephemeral-port>` 上启动私有 Harness 后端。[macOS 决策](../../.agents/notes/implemented/feature/2026-08-16-macos-desktop-app.md)、[Windows 决策](../../.agents/notes/implemented/feature/2026-08-17-windows-desktop-app.md)和[封闭运行时决策](../../.agents/notes/implemented/architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)负责平台与依赖边界。
+本包使用 Tauri 2 构建个人使用的 DeepSeek Harness 桌面应用，支持搭载 macOS 14 或更高版本的 Apple Silicon Mac 与 Windows 11 x64 电脑。原生外壳保留现有 Web UI，并以 Node 24 单文件 sidecar 运行 Harness Web 后端，只监听私有的 `http://127.0.0.1:<ephemeral-port>/` 来源。[Tauri 与 sidecar 决策](../../.agents/notes/implemented/architecture/2026-08-21-tauri-desktop-sidecar.md)负责运行时划分；Electron 的 [macOS](../../.agents/notes/implemented/feature/2026-08-16-macos-desktop-app.md)、[Windows](../../.agents/notes/implemented/feature/2026-08-17-windows-desktop-app.md)和[封闭运行时](../../.agents/notes/implemented/architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)记录在最终 Windows 验收完成、回退实现删除前仍然有效。
 
 ## 支持目标与构建
 
-`pnpm run package:desktop` 只构建当前宿主的原生目标。请在 Apple Silicon Mac 或 Windows 11 x64 电脑上从仓库根目录运行。macOS 到 Windows 的交叉打包、Wine、Intel Mac、Windows ARM64、证书、Windows 签名、MSIX 和自动更新均不属于本包范围。
+`pnpm run package:desktop:tauri` 只构建当前宿主的原生目标。请在 Apple Silicon Mac 或 Windows 11 x64 电脑上从仓库根目录运行。交叉打包、Wine、Intel Mac、Windows ARM64、MSIX、Windows Authenticode 签名、Apple Developer ID 签名和公证均不受支持。
 
 | 宿主 | 输出 |
 | --- | --- |
-| 搭载 Apple Silicon 的 macOS 14+ | `apps/desktop/release/mac-arm64/DeepSeek Harness.app` 与 `apps/desktop/release/DeepSeek Harness-<version>-arm64.dmg` |
-| Windows 11 x64 | `apps/desktop/release/win-unpacked` 与 `apps/desktop/release/DeepSeek Harness Setup <version>-x64.exe` |
+| 搭载 Apple Silicon 的 macOS 14+ | `apps/desktop/release-tauri/DeepSeek Harness.app` 与 `DeepSeek Harness-<version>-arm64.dmg` |
+| Windows 11 x64 | `apps/desktop/release-tauri/win-unpacked` 与 `DeepSeek Harness Setup <version>-x64.exe` |
 
-`apps/desktop/package.json` 是版本真源。打包前会拒绝其他所有宿主或架构。
+sidecar 把 Web 后端、内置插件和 Web 资源嵌入 VFS；目标平台专用的 `node-pty`、ripgrep 和进程辅助程序仍是普通 sidecar 文件。安装包不包含开发用 TypeScript、source map、测试或文档。第三方插件保留在用户 Harness profile 的磁盘目录中，可以加载自己的私有依赖，并共享打包后的 Cordis 与 Harness Service Definition 单例。
 
 ## 安装与更新
 
-在 macOS 上，请退出 DeepSeek Harness，打开 DMG，再将 `DeepSeek Harness.app` 复制到 `/Applications`。更新时，请退出应用，并仅替换 `/Applications/DeepSeek Harness.app`；替换应用不会删除 `~/Library/Application Support/DeepSeek Harness` 下的数据。
+在 macOS 上，请打开 DMG，再将 `DeepSeek Harness.app` 复制到 `/Applications`。个人构建使用带 Hardened Runtime 的 ad-hoc 签名，但未经公证。如果 Gatekeeper 阻止首次启动，请按照 Apple 的[打开来自身份不明开发者的 Mac App](https://support.apple.com/guide/mac-help/mh40616/mac)说明操作；不要全局关闭 Gatekeeper。
 
-macOS 个人构建使用带 Hardened Runtime 的 ad-hoc 签名，但未经公证。Gatekeeper 可能会阻止首次启动被隔离的应用。请先尝试打开应用；macOS 阻止后，打开「系统设置 > 隐私与安全性」，点击「仍要打开」，再确认「打开」。当前恢复步骤以 Apple 的[打开来自未识别开发者的 Mac 应用](https://support.apple.com/guide/mac-help/mh40616/mac)指南为准。请勿在系统范围内禁用 Gatekeeper。
+在 Windows 上，请运行 `DeepSeek Harness Setup <version>-x64.exe`。一键式 NSIS 安装程序按当前用户安装，不申请提权；它创建开始菜单快捷方式，不创建桌面快捷方式，安装结束后不自动启动。程序使用 Windows 11 自带的系统 WebView2，不要求开发者模式。个人构建有意保持未签名，因此 SmartScreen 在文件建立信誉前可能警告。只有确认安装程序来自预期 Release 后才继续；不要关闭 Defender 或 SmartScreen。参见微软的 [SmartScreen 信誉说明](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)。
 
-在 Windows 上，请运行 `DeepSeek Harness Setup <version>-x64.exe`。向导式 NSIS 安装程序默认为当前用户安装且不请求提权，允许选择安装目录，并会创建桌面和开始菜单快捷方式；安装完成后不会启动应用。随包分发的运行时完整保留（不剥离源码），在启用实时杀毒扫描的机器上，首次安装与冷启动仍可能需要几分钟，因为安装程序要写入数万个小文件。若希望加快安装与首次启动，可将安装目录（`%LOCALAPPDATA%\Programs\...`）与 Harness 数据目录（`%APPDATA%\DeepSeek Harness`）加入 Microsoft Defender 排除列表（Windows 安全中心 > 病毒和威胁防护 > 管理设置 > 排除项）。这只会关闭应用文件的实时扫描；请仅在可信的机器上使用。运行更新版本的安装程序即可更新。卸载会移除应用与快捷方式，但保留 Harness 用户数据。
-
-Windows 个人构建有意保持未签名，因此 Microsoft Defender SmartScreen 可能显示「Windows 已保护你的电脑」。仅当安装程序来自你信任且已核验的来源时，才选择「仍要运行」；企业策略可能不提供该选项。请遵循 Microsoft 当前的 [SmartScreen 信誉指南](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)。请勿在系统范围内禁用 Microsoft Defender 或 SmartScreen。
-
-应用会对照所配置 GitHub 仓库的 Releases（默认 `GZXiaoBai/deepseek-harness`、`stable` 频道）检查更新并就地升级。**Check for Updates…** 菜单项执行手动检查；**Automatic Updates** 开关控制启动时的自动检查。Windows 会下载 NSIS 安装程序，按 release 校验和验证 SHA-256 后，在退出时静默运行安装程序。macOS 会下载 DMG、验证后通过管理员授权把新 App 安装进 `/Applications`；由于个人构建是 ad-hoc 签名且未公证，安装副本会移除 quarantine 属性，Gatekeeper 仍可能要求首次启动时确认。更新偏好持久化在应用数据目录下的 `desktop-settings.json`。发布方式为打 `desktop-v<version>` 标签；标签工作流会构建两个平台并把安装程序、DMG 与按资产的校验和上传到 release。校验和不匹配会中止更新且不安装。
+Harness 菜单可以手工检查更新或切换自动检查。Release 会发布 NSIS 安装程序、macOS 更新归档、`.sig` 文件、`latest.json`、DMG 与 SHA-256 文件。Tauri 使用 `tauri.conf.json` 中的公钥验证每个更新，签名私钥只存在于发布密钥中。未签名或被修改的更新会被拒绝，这项校验独立于操作系统代码签名。
 
 ## 数据与日志
 
-在 macOS 上，Electron 拥有 `~/Library/Application Support/DeepSeek Harness`；在 Windows 上，它拥有 `%APPDATA%\DeepSeek Harness`。窗口边界存储在 `window-state.json` 中，桌面生命周期日志追加到 `Logs/desktop.log`。Harness 拥有平台目录下的 `Harness/` 子树，包括配置、profile 和会话。替换或卸载应用不会改动此目录；删除它会重置 Desktop 和 Harness 状态。
+应用继续使用原有数据位置：
 
-如果初始化在恢复界面接管前失败，应用会记录原始错误；如果控制器已创建，应用会尝试并等待其关闭。清理失败会另行报告，此时不能保证后端终止。Electron 仍会以状态码 1 退出并释放单实例锁。
+- macOS：`~/Library/Application Support/DeepSeek Harness`
+- Windows：`%APPDATA%\DeepSeek Harness`
+
+Harness 数据位于 `Harness/`，桌面日志在 `Logs/desktop.log` 下轮转，性能统计写入 `Logs/desktop-performance.json`，设置继续保存在 `desktop-settings.json`。替换或卸载应用会保留此目录；删除此目录会重置 Desktop 与 Harness 状态。
+
+原生外壳会立即显示内置启动页，只接受 sidecar 报告的精确回环来源，拒绝弹窗和非预期顶层导航，也不向 Web UI 开放 Tauri shell、文件系统或通用 invoke API。第二次启动只聚焦现有窗口。关闭时先通过协议请求 Harness dispose 并等待完成；Windows Job Object 与 macOS 进程组终止仅作为超时兜底。
 
 ## 验证
 
-请在生成产物的同一平台上运行共享行为测试、构建与原生打包验证：
+可在任一宿主运行行为测试与 Rust 测试，再在目标宿主构建和验证原生包：
 
 ```sh
 pnpm run test:desktop
-pnpm run build:desktop
-pnpm --filter @deepseek-ai/dsh-desktop run verify:package
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+pnpm run package:desktop:tauri
+pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:macos
+# Windows: pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:windows
 ```
 
-macOS 验证器会验证发布 App，启动仓库外的副本，并对已挂载 DMG 中的 App 重新进行静态验证。它检查 Web UI、单实例交接、隔离的 Harness 数据、进程与端口清理、运行时包含性、arm64 Mach-O 文件、ad-hoc Hardened Runtime 签名和 entitlements。`spctl` 拒绝这个有意未经公证的个人构建属于预期结果。
-
-Windows 验证器会同时验证 `win-unpacked` 与静默安装的当前用户 NSIS 版本。它检查运行时没有符号链接、junction 或其他 reparse point；应用负载中的每个 PE 文件均为 x64；标准 NSIS 卸载程序是已安装根目录下唯一经过审查的 x86 PE，且 COFF machine 固定为 `0x014c`；应用、安装程序和卸载程序均为 `NotSigned`；随包原生文件夹弹窗 worker 会打开真实弹窗，并在验证器关闭弹窗后报告取消终态；回环 HTTP 与现有页面标题正常；第二次启动保留原后端；关闭窗口会移除所拥有的进程树和监听器；安装会创建开始菜单和桌面快捷方式；卸载会移除程序文件与快捷方式，但保留 Harness 数据。验证器还会记录静默安装耗时、静默卸载耗时与后端启动耗时（harness-starting 到 harness-ready），并把安装程序体积、应用文件数、字节总数与这三项耗时写入 `apps/desktop/release/verify-stats.json`，CI 工作流打印该文件作为安装与启动耗时的回归信号。
-
-GitHub Windows Server 2025 工作流是自动打包门禁。首次发布 Windows 版本前，还必须在真实 Windows 11 x64 电脑上运行同一安装程序与验证器，并单独记录结果；Server 2025 CI 不能作为 Windows 11 验收证据。
+Windows Server 2025 工作流会验证当前用户静默安装与卸载、快捷方式位置、零 reparse point、x64 PE 负载、预期未签名状态、严格回环启动、profile 初始化、单实例归属、关闭清理、数据保留、文件与体积限制以及 CI 时间限制。协议测试会保留包含中文和空格的路径，发布工作流还会证明原始更新包验签成功，而修改一个字节后的包验签失败。正式发布前，必须在开启 Defender 且未设置排除项的真实 Windows 11 x64 电脑上运行同一安装验收，并实际选择包含中文和空格的目录；Server 2025 不能替代 Windows 11 实机结果。

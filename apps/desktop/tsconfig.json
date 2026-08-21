@@ -6,5 +6,19 @@
   },
   "include": [
     "src"
+  ],
+  "references": [
+    {
+      "path": "../../vendor/cordis"
+    },
+    {
+      "path": "../../packages/host/directory-picker"
+    },
+    {
+      "path": "../../packages/boot/app-boot"
+    },
+    {
+      "path": "../cli"
+    }
   ]
 }

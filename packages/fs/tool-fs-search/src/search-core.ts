@@ -21,6 +21,7 @@
 
 import { existsSync } from 'node:fs'
 import { isAbsolute, relative, sep } from 'node:path'
+import { isSea } from 'node:sea'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
@@ -171,7 +172,7 @@ let rgPathPromise: Promise<string> | undefined
 export function resolveRgPath(): Promise<string> {
   rgPathPromise ??= Promise.resolve().then(async () => {
     const executableSidecar = `${process.execPath}-rg`
-    if ('pkg' in process && existsSync(executableSidecar)) return executableSidecar
+    if ((isSea() || 'pkg' in process) && existsSync(executableSidecar)) return executableSidecar
     return (await import('@vscode/ripgrep')).rgPath
   })
   return rgPathPromise

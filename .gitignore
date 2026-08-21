@@ -33,8 +33,14 @@ python/**/__pycache__/
 python/**/.pytest_cache/
 apps/web/dist/
 apps/desktop/.runtime/
+apps/desktop/.sidecar-runtime/
 apps/desktop/build/icon.icns
 apps/desktop/release/
+apps/desktop/release-tauri/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/icons/
 .artifacts/
 .dsh-build/
 .playwright-mcp/

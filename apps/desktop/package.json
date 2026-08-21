@@ -12,13 +12,27 @@
   },
   "type": "module",
   "main": "lib/main.js",
+  "exports": {
+    ".": "./lib/main.js",
+    "./sidecar-directory-picker": "./lib/sidecar-directory-picker.js"
+  },
   "files": [
     "lib/*.js",
+    "sidecar",
     "static",
     "build"
   ],
   "scripts": {
     "build": "pnpm run verify:runtime-closure && tsc -p tsconfig.json && tsdown --config tsdown.config.ts",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "verify:sidecar": "node scripts/verify-sidecar-feasibility.mjs",
+    "build:tauri": "tauri build",
+    "build:tauri:macos": "tauri build --config src-tauri/tauri.macos.conf.json --target aarch64-apple-darwin",
+    "build:tauri:windows": "tauri build --config src-tauri/tauri.windows.conf.json --target x86_64-pc-windows-msvc",
+    "package:tauri": "node scripts/package-tauri.mjs",
+    "verify:tauri:macos": "node scripts/verify-tauri-macos.mjs",
+    "verify:tauri:windows": "node scripts/verify-tauri-windows.mjs",
+    "check:tauri": "node scripts/build-icon.mjs && node scripts/prepare-tauri-check-sidecar.mjs && cargo check --manifest-path src-tauri/Cargo.toml",
     "test": "pnpm --dir ../.. exec vitest run apps/desktop/tests",
     "verify:runtime-closure": "tsx ../../scripts/verify-runtime-closure.ts --manifest apps/desktop/runtime/package.json",
     "stage": "node scripts/stage-runtime.mjs",
@@ -27,9 +41,16 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh": "workspace:^",
+    "@deepseek-ai/dsh-app-boot": "workspace:^",
+    "@deepseek-ai/dsh-host-directory-picker": "workspace:^",
+    "koffi": "^3.1.0",
+    "node-pty": "1.2.0-beta.15",
     "shell-path": "3.1.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
     "@electron/rebuild": "4.2.0",
     "@types/node": "^22.20.0",
     "electron": "43.4.0",

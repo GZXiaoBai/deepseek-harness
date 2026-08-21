@@ -1,0 +1,4 @@
+# Desktop-only host integration. The browser half remains the existing native
+# directory flow, while the node half delegates the chooser to Tauri.
+- id: directory-picker
+  name: '@deepseek-ai/dsh-desktop/sidecar-directory-picker'

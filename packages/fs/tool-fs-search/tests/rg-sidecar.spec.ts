@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { dependencyRgPath, existsSync } = vi.hoisted(() => ({
+const { dependencyRgPath, existsSync, isSea } = vi.hoisted(() => ({
   dependencyRgPath: '/node_modules/@vscode/ripgrep/bin/rg',
   existsSync: vi.fn(),
+  isSea: vi.fn(() => false),
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -11,10 +12,13 @@ vi.mock('node:fs', async (importOriginal) => {
 })
 
 vi.mock('@vscode/ripgrep', () => ({ rgPath: dependencyRgPath }))
+vi.mock('node:sea', () => ({ isSea }))
 
 beforeEach(() => {
   vi.resetModules()
   existsSync.mockReset()
+  isSea.mockReset()
+  isSea.mockReturnValue(false)
   Reflect.deleteProperty(process, 'pkg')
 })
 
@@ -25,6 +29,16 @@ afterEach(() => {
 describe('ripgrep resolution', () => {
   it('uses the native sidecar beside the current executable', async () => {
     Reflect.defineProperty(process, 'pkg', { configurable: true, value: {} })
+    existsSync.mockReturnValue(true)
+    const sidecar = `${process.execPath}-rg`
+    const { resolveRgPath } = await import('@deepseek-ai/dsh-tool-fs-search')
+
+    await expect(resolveRgPath()).resolves.toBe(sidecar)
+    expect(existsSync).toHaveBeenCalledWith(sidecar)
+  })
+
+  it('uses the native sidecar in a Node SEA without the legacy pkg marker', async () => {
+    isSea.mockReturnValue(true)
     existsSync.mockReturnValue(true)
     const sidecar = `${process.execPath}-rg`
     const { resolveRgPath } = await import('@deepseek-ai/dsh-tool-fs-search')

@@ -10,6 +10,8 @@ const sourceIcon = fileURLToPath(new URL('../../web/public/favicon.svg', import.
 const buildDirectory = new URL('../build/', import.meta.url)
 const outputIcns = new URL('../build/icon.icns', import.meta.url)
 const outputIco = new URL('../build/icon.ico', import.meta.url)
+const tauriIconDirectory = new URL('../src-tauri/icons/', import.meta.url)
+const tauriIcon = new URL('../src-tauri/icons/icon.png', import.meta.url)
 const iconSizes = [
   ['icon_16x16.png', 16],
   ['icon_16x16@2x.png', 32],
@@ -28,6 +30,8 @@ if (process.platform !== 'darwin' && process.platform !== 'win32') {
 }
 
 await mkdir(buildDirectory, { recursive: true })
+await mkdir(tauriIconDirectory, { recursive: true })
+await sharp(sourceIcon).resize(512, 512).png().toFile(fileURLToPath(tauriIcon))
 if (process.platform === 'win32') {
   const png = await sharp(sourceIcon).resize(256, 256).png().toBuffer()
   await writeFile(outputIco, createWindowsIco(png))

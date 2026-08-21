@@ -17,7 +17,7 @@ env:
 
 jobs:
   windows-desktop:
-    name: Windows Desktop / NSIS x64
+    name: Windows Tauri / NSIS x64
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
           && github.event_name == 'pull_request'
@@ -31,13 +31,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # Source tests create symlink fixtures. Packaged and installed runtimes are separately required to contain no reparse points.
-      - name: Enable Developer Mode for source tests
-        shell: pwsh
-        run: >-
-          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
-          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
-
       - uses: pnpm/action-setup@v4
         with:
           dest: ${{ runner.temp }}/setup-pnpm
@@ -46,45 +39,43 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
-      - name: Restore Electron binary cache
-        uses: actions/cache@v5
+      - name: Install Rust MSVC target
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: ${{ runner.temp }}/dsh-electron
-          key: windows-electron-${{ hashFiles('apps/desktop/package.json') }}-win32-x64
+          targets: x86_64-pc-windows-msvc
 
       - name: Install dependencies
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
-      - name: Provision verified Electron binary
-        shell: pwsh
-        timeout-minutes: 10
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: '& apps/desktop/scripts/provision-windows-electron.ps1'
-
-      - name: Test shared Desktop behavior on Windows
+      - name: Test Tauri Desktop behavior
         shell: pwsh
         run: pnpm run test:desktop
 
-      - name: Build Windows x64 App and NSIS
+      - name: Build Windows x64 Tauri App and NSIS
         shell: pwsh
-        run: pnpm run package:desktop
+        run: pnpm run package:desktop:tauri
+
+      - name: Report packaged sidecar feasibility
+        shell: pwsh
+        run: node apps/desktop/scripts/verify-sidecar-feasibility.mjs
 
       - name: Verify unpacked App, installation, launch, and uninstall
         shell: pwsh
         env:
           DSH_POWERSHELL_EXECUTABLE: pwsh.exe
-        run: pnpm --filter @deepseek-ai/dsh-desktop run verify:package
+        run: pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:windows
 
-      - name: Report package size and install duration
+      - name: Report package size and performance
         shell: pwsh
-        run: Get-Content apps/desktop/release/verify-stats.json
+        run: Get-Content apps/desktop/release-tauri/verify-stats.json
 
-      - name: Upload unsigned personal installer
+      - name: Upload unsigned personal installer and statistics
         uses: actions/upload-artifact@v4
         with:
-          name: deepseek-harness-windows-x64
-          path: apps/desktop/release/DeepSeek Harness Setup *-x64.exe
+          name: deepseek-harness-tauri-windows-x64
+          path: |
+            apps/desktop/release-tauri/DeepSeek Harness Setup *-x64.exe
+            apps/desktop/release-tauri/verify-stats.json
           if-no-files-found: error
           retention-days: 14

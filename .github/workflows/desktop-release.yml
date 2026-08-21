@@ -8,14 +8,19 @@ on:
 permissions:
   contents: write
 
+env:
+  PRIMARY_NODE_VERSION: '24'
+  DSH_TELEMETRY_DISABLED: '1'
+  DSH_UPDATE_PUBLIC_KEY: 'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyQzAwMzNFOTZGN0ZGMDQKUldRRS8vZVdQZ1BBb25lb0txMDVjT3psb3NlVnZlZEdsR1A3dk1rT25nR0ZjdmlPMXlrN1hENWMK'
+
 jobs:
   windows:
     name: Desktop Release / Windows NSIS x64
     runs-on: windows-2025
     timeout-minutes: 120
     env:
-      PRIMARY_NODE_VERSION: '24'
-      DSH_TELEMETRY_DISABLED: '1'
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,51 +35,57 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
-      - name: Restore Electron binary cache
-        uses: actions/cache@v5
+      - name: Install Rust MSVC target
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: ${{ runner.temp }}/dsh-electron
-          key: windows-electron-${{ hashFiles('apps/desktop/package.json') }}-win32-x64
+          targets: x86_64-pc-windows-msvc
+
+      - name: Require updater signing secrets
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'TAURI_SIGNING_PRIVATE_KEY is required' }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { throw 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required' }
 
       - name: Install dependencies
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
-      - name: Provision verified Electron binary
+      - name: Package Tauri Windows x64 App and NSIS
         shell: pwsh
-        timeout-minutes: 10
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: '& apps/desktop/scripts/provision-windows-electron.ps1'
+        run: pnpm run package:desktop:tauri
 
-      - name: Package Windows x64 App and NSIS
-        shell: pwsh
-        run: pnpm run package:desktop
-
-      - name: Verify the packaged application
+      - name: Verify unpacked App, installation, launch, and uninstall
         shell: pwsh
         env:
           DSH_POWERSHELL_EXECUTABLE: pwsh.exe
-        run: pnpm --filter @deepseek-ai/dsh-desktop run verify:package
+        run: pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:windows
 
-      - name: Publish installer to the release
+      - name: Verify updater signature and tamper rejection
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $installer = Get-ChildItem "apps/desktop/release/DeepSeek Harness Setup *-x64.exe" | Select-Object -First 1
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLower()
-          "$hash  $($installer.Name)" | Set-Content -Encoding ascii "apps/desktop/release/$($installer.Name).sha256"
-          gh release create "$env:GITHUB_REF_NAME" "$($installer.FullName)" "apps/desktop/release/$($installer.Name).sha256" --title "$env:GITHUB_REF_NAME" --generate-notes 2>$null
-          gh release upload "$env:GITHUB_REF_NAME" "$($installer.FullName)" "apps/desktop/release/$($installer.Name).sha256" --clobber
+          $artifact = Get-ChildItem 'apps/desktop/release-tauri/DeepSeek Harness Setup *-x64.exe' | Select-Object -First 1
+          $env:DSH_UPDATE_ARTIFACT = $artifact.FullName
+          $env:DSH_UPDATE_SIGNATURE = "$($artifact.FullName).sig"
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test packaged_update_signature -- --nocapture
+
+      - name: Upload signed Windows release artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: deepseek-harness-tauri-windows-x64
+          path: |
+            apps/desktop/release-tauri/DeepSeek Harness Setup *-x64.exe
+            apps/desktop/release-tauri/DeepSeek Harness Setup *-x64.exe.sig
+            apps/desktop/release-tauri/verify-stats.json
+          if-no-files-found: error
+          retention-days: 14
 
   macos:
     name: Desktop Release / macOS arm64 DMG
     runs-on: macos-15
     timeout-minutes: 120
     env:
-      PRIMARY_NODE_VERSION: '24'
-      DSH_TELEMETRY_DISABLED: '1'
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -89,20 +100,80 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
+      - name: Install Rust Apple Silicon target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Require updater signing secrets
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo 'TAURI_SIGNING_PRIVATE_KEY is required' >&2; exit 1; }
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" || { echo 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required' >&2; exit 1; }
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Package macOS arm64 App and DMG
-        run: pnpm run package:desktop
+      - name: Package Tauri macOS arm64 App and DMG
+        run: pnpm run package:desktop:tauri
 
-      - name: Verify the packaged application
-        run: pnpm --filter @deepseek-ai/dsh-desktop run verify:package
+      - name: Verify App, DMG, signature, launch, and shutdown
+        run: pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:macos
 
-      - name: Publish DMG to the release
+      - name: Verify updater signature and tamper rejection
+        run: |
+          ARTIFACT=$(realpath "$(find apps/desktop/release-tauri -maxdepth 1 -name '*.app.tar.gz' -print -quit)")
+          DSH_UPDATE_ARTIFACT="$ARTIFACT" \
+          DSH_UPDATE_SIGNATURE="$ARTIFACT.sig" \
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test packaged_update_signature -- --nocapture
+
+      - name: Upload signed macOS release artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: deepseek-harness-tauri-macos-arm64
+          path: |
+            apps/desktop/release-tauri/*-arm64.dmg
+            apps/desktop/release-tauri/*.app.tar.gz
+            apps/desktop/release-tauri/*.app.tar.gz.sig
+            apps/desktop/release-tauri/verify-stats.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Desktop Release / Publish
+    runs-on: ubuntu-24.04
+    needs: [windows, macos]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: deepseek-harness-tauri-windows-x64
+          path: collected/windows
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: deepseek-harness-tauri-macos-arm64
+          path: collected/macos
+
+      - name: Create updater manifest and SHA-256 files
+        run: |
+          mkdir release-assets
+          find collected/windows collected/macos -maxdepth 1 -type f ! -name 'verify-stats.json' -exec cp '{}' release-assets/ ';'
+          VERSION=$(node -p "require('./apps/desktop/package.json').version")
+          node apps/desktop/scripts/create-tauri-update-manifest.mjs --release-directory release-assets --tag "$GITHUB_REF_NAME" --version "$VERSION"
+          find release-assets -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.app.tar.gz' \) -print0 | while IFS= read -r -d '' artifact; do
+            (cd release-assets && sha256sum "$(basename "$artifact")") > "$artifact.sha256"
+          done
+
+      - name: Publish installers and signed updater metadata
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          DMG=$(ls apps/desktop/release/*-arm64.dmg | head -1)
-          shasum -a 256 "$DMG" | sed 's#apps/desktop/release/##' > "$DMG.sha256"
-          gh release create "$GITHUB_REF_NAME" "$DMG" "$DMG.sha256" --title "$GITHUB_REF_NAME" --generate-notes 2>/dev/null || true
-          gh release upload "$GITHUB_REF_NAME" "$DMG" "$DMG.sha256" --clobber
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --title "$GITHUB_REF_NAME" --generate-notes

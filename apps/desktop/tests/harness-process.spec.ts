@@ -139,6 +139,7 @@ describe('HarnessProcessController', () => {
         '127.0.0.1',
         '--port',
         '0',
+        '--no-open',
       ],
     })
     await electron.controller.stop()
@@ -152,6 +153,7 @@ describe('HarnessProcessController', () => {
       '127.0.0.1',
       '--port',
       '0',
+      '--no-open',
     ])
     await plainNode.controller.stop()
   })

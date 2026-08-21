@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": [
+      "binaries/dsh-desktop-sidecar",
+      "binaries/dsh-desktop-sidecar-rg"
+    ],
+    "targets": [
+      "nsis"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "../build/icon.ico",
+        "languages": [
+          "English",
+          "SimpChinese"
+        ]
+      }
+    }
+  }
+}

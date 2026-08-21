@@ -93,10 +93,15 @@ export function resolveTelemetryPatch(disabledEnv: string | undefined, hasRow: b
  * on the same file, so both compose over the identical base).
  * @param name - the profile name.
  * @param userLayer - `false` skips parsing `cordis.patch.yml` (the default dump).
+ * @param moduleFallback - `resolver` skips filesystem links because a host-installed loader hook owns in-box packages.
  * @returns the loaded profile.
  */
-export function prepareProfile(name: string, userLayer = true): Profile {
-  healProfilesModuleFallback(INSTALL_ANCHOR)
+export function prepareProfile(
+  name: string,
+  userLayer = true,
+  moduleFallback: 'links' | 'resolver' = 'links',
+): Profile {
+  if (moduleFallback === 'links') healProfilesModuleFallback(INSTALL_ANCHOR)
   const profile = loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
   writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
   return profile
@@ -142,8 +147,9 @@ function allPatches(composed: ComposedProfile): PatchOptions[] {
 function composeProfile(
   name: string,
   patchFiles: readonly string[],
+  moduleFallback: 'links' | 'resolver',
 ): ComposedProfile {
-  const profile = prepareProfile(name)
+  const profile = prepareProfile(name, true, moduleFallback)
   const homePatches = loadOptionalPatches(NAME, homePatchPath()) ?? []
   const overlays = patchFiles.flatMap(file => loadOverlayPatches(NAME, resolve(file)))
   const bundlePatches = profile.layers.flatMap(layer => layer.patches)
@@ -176,6 +182,12 @@ export interface RunProfileOptions {
   environment: LaunchEnvironmentSnapshot
   /** The profile name to boot. */
   profile: string
+  /** Installation-module strategy: symlink fallback for Node, resolver hook for a VFS sidecar. */
+  moduleFallback?: 'links' | 'resolver'
+  /** Optional host-owned URL used to resolve bare packages in a closed runtime. */
+  bareModuleBaseUrl?: string
+  /** Optional host setup completed after Loader installation and before config entries mount. */
+  prepareHost?: (ctx: Context) => Promise<void> | void
   /** `--patch` overlay paths, in argv order. */
   patchFiles: readonly string[]
   /** The invocation's inner arguments, handed to the tree through `ctx.cmdlineArgs`. */
@@ -205,7 +217,7 @@ function suppressShutdownError(ctx: Context, signal: AbortSignal, error: unknown
  * @returns the settled root context and the shutdown controller.
  */
 export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Context; shutdown: ProcessShutdown }> {
-  const composed = composeProfile(options.profile, options.patchFiles)
+  const composed = composeProfile(options.profile, options.patchFiles, options.moduleFallback ?? 'links')
   const app: { current?: Context } = {}
   const shutdown = createProcessShutdown(async () => { await app.current?.fiber.dispose() })
   const signalShutdown = new AbortController()
@@ -245,7 +257,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   ])
   // Cloned for the same insert-aliasing reason as composeLive: the boot
   // application must not mutate the objects later reloads recompose from.
-  const ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), (hostCtx) => {
+  const ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), async (hostCtx) => {
     app.current = hostCtx
     // Before any config-tree entry mounts, so plugins resolve all launch-time
     // environment values from the same immutable provenance snapshot.
@@ -256,7 +268,8 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       args: options.args,
       exit: code => void shutdown.shutdown(code),
     })
-  })
+    await options.prepareHost?.(hostCtx)
+  }, options.bareModuleBaseUrl)
   app.current = ctx
   // A surface can dispose the whole tree while boot or this post-boot watcher
   // setup is still in flight — a signal, or a fast one-shot's appExit. Loader
