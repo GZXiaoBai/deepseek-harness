@@ -26,6 +26,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(NavigationState::new())
+        .manage(updater::StartupUpdateGate::default())
         .plugin(
             tauri::plugin::Builder::<tauri::Wry>::new("desktop-navigation-policy")
                 .on_navigation(|webview, url| {
@@ -69,10 +70,17 @@ fn main() {
                     .state::<NavigationState>()
                     .is_ready_origin(payload.url())
             {
-                webview
-                    .app_handle()
-                    .state::<DesktopRuntime>()
-                    .record_page_loaded();
+                let app = webview.app_handle();
+                let runtime = app.state::<DesktopRuntime>();
+                runtime.record_page_loaded();
+                let automatic_updates =
+                    updater::automatic_updates_enabled(&runtime.settings_path());
+                if app
+                    .state::<updater::StartupUpdateGate>()
+                    .begin(automatic_updates)
+                {
+                    updater::check_for_updates(app.clone(), false);
+                }
             }
         })
         .setup(|app| {
@@ -136,9 +144,6 @@ fn main() {
             app.state::<DesktopRuntime>()
                 .start(app.handle().clone())
                 .map_err(|error| Box::<dyn std::error::Error>::from(error))?;
-            if automatic_updates {
-                updater::check_for_updates(app.handle().clone(), false);
-            }
             Ok(())
         })
         .build(tauri::generate_context!())

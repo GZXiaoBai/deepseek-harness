@@ -88,7 +88,9 @@ describe('Tauri Windows package verification', () => {
       forcedTerminationCount: 0,
     }
     expect(validatePerformanceStats(stats, 10_000)).toEqual(stats)
-    expect(() => validatePerformanceStats({ ...stats, pageLoadedMs: 10_001 }, 10_000)).toThrow(/page load/)
+    expect(() => validatePerformanceStats({ ...stats, pageLoadedMs: 10_001 }, 10_000)).toThrow(
+      /page load[\s\S]*"httpReadyMs":950/,
+    )
     expect(() => validatePerformanceStats({ ...stats, forcedTerminationCount: 1 }, 10_000)).toThrow(/forced termination/)
   })
 })

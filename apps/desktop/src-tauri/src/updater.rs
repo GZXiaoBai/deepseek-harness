@@ -1,9 +1,26 @@
 use crate::supervisor::DesktopRuntime;
 use serde_json::{Map, Value};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_updater::UpdaterExt;
+
+/// Ensures the automatic update request starts once, after the Web UI is usable.
+#[derive(Default)]
+pub struct StartupUpdateGate {
+    started: AtomicBool,
+}
+
+impl StartupUpdateGate {
+    /// Claims the deferred automatic update request when the preference is enabled.
+    pub fn begin(&self, enabled: bool) -> bool {
+        enabled && !self.started.swap(true, Ordering::SeqCst)
+    }
+}
 
 /// Reads the existing Electron-compatible updater preference without rewriting it.
 pub fn automatic_updates_enabled(path: &Path) -> bool {
@@ -138,5 +155,13 @@ mod tests {
         fs::write(&path, "not json").unwrap();
         assert!(automatic_updates_enabled(&path));
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn starts_the_deferred_automatic_check_once_after_page_readiness() {
+        let gate = StartupUpdateGate::default();
+        assert!(!gate.begin(false));
+        assert!(gate.begin(true));
+        assert!(!gate.begin(true));
     }
 }

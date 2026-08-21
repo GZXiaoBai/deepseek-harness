@@ -105,7 +105,9 @@ export function validatePerformanceStats(value, pageLoadLimitMs) {
     }
   }
   if (value.pageLoadedMs > pageLoadLimitMs) {
-    throw new Error(`Desktop page load exceeded ${pageLoadLimitMs}ms: ${value.pageLoadedMs}ms`)
+    throw new Error(
+      `Desktop page load exceeded ${pageLoadLimitMs}ms: ${value.pageLoadedMs}ms; stats=${JSON.stringify(value)}`,
+    )
   }
   if (value.forcedTerminationCount !== 0) {
     throw new Error(`Desktop required forced termination ${value.forcedTerminationCount} time(s)`)
@@ -163,7 +165,9 @@ async function verifyLaunch(executable, cwd) {
     await requireFile(join(userData, 'Harness/profiles/web/cordis.yml'), 'Packaged Web profile was not initialized')
     const initialStats = await waitForPerformance(userData, false)
     if (initialStats.pageLoadedMs > MAX_CI_PAGE_LOAD_MS) {
-      throw new Error(`Desktop page load exceeded ${MAX_CI_PAGE_LOAD_MS}ms: ${initialStats.pageLoadedMs}ms`)
+      throw new Error(
+        `Desktop page load exceeded ${MAX_CI_PAGE_LOAD_MS}ms: ${initialStats.pageLoadedMs}ms; stats=${JSON.stringify(initialStats)}`,
+      )
     }
 
     const second = launch(executable, cwd, userData)

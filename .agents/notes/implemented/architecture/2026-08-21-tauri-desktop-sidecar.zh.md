@@ -18,6 +18,8 @@ Tauri 2 负责原生窗口、菜单、导航策略、单实例聚焦、窗口状
 
 Windows 先以挂起状态创建 sidecar，把它加入设置了 `KILL_ON_JOB_CLOSE` 的 Job Object，再恢复执行。macOS 为它分配独立 POSIX 进程组。正常关闭先发送 `shutdown`，等待 Harness dispose 与 `stopped`，并记录强制终止次数；只有超时才使用操作系统进程所有权兜底。桌面日志会轮转，性能数据记录进程启动、sidecar spawn、插件树就绪、HTTP 就绪、页面加载、关闭和强制终止。
 
+自动更新检查只在第一个 Harness 页面完成加载后启动一次，避免外部网络延迟与受测启动路径争用资源。Harness 菜单中的手工更新检查仍可立即使用。
+
 Tauri NSIS 包按当前用户安装，不提权，使用 Windows 11 系统 WebView2，只创建开始菜单快捷方式，并在卸载时保留 `%APPDATA%\DeepSeek Harness`。macOS 包只支持 Apple Silicon，使用带 Hardened Runtime 的 ad-hoc 签名，但不公证。两个目标都复用 Electron 数据目录和设置。Tauri 更新包使用独立 minisign 密钥签名；公钥随配置交付，私钥只存在于发布密钥。应用代码签名与更新签名相互独立，个人 Windows 构建继续保持未签名。
 
 Electron 实现在 Windows Server 2025 CI 与真实 Windows 11 x64 电脑通过同一套安装、目录选择、启动和关闭验收前仍可使用。它的 [macOS](../feature/2026-08-16-macos-desktop-app.md)、[Windows](../feature/2026-08-17-windows-desktop-app.md)、[更新器](../feature/2026-08-18-desktop-updater.md)和[封闭运行时](2026-08-17-desktop-closed-runtime-deploy-root.md)决策记录了建立功能对等后才会删除的回退实现。
