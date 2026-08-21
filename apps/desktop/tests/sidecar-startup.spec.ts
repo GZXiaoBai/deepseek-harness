@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { describe, expect, it } from 'vitest'
 import {
   buildDesktopSidecarProfileOptions,
@@ -5,6 +7,30 @@ import {
 } from '../src/sidecar-startup.ts'
 
 describe('desktop sidecar startup', () => {
+  it('replaces the adaptive directory picker with the desktop sidecar provider', () => {
+    const webPatch = fileURLToPath(new URL(
+      '../../../packages/bundle/web-app/cordis.patch.yml',
+      import.meta.url,
+    ))
+    const desktopPatch = fileURLToPath(new URL('../sidecar/cordis.patch.yml', import.meta.url))
+    const entries = composeEntries([
+      loadOverlayPatches('desktop-test', webPatch),
+      loadOverlayPatches('desktop-test', desktopPatch),
+    ])
+
+    expect(entries.filter(entry => entry.id === 'directory-picker')).toEqual([
+      expect.objectContaining({
+        name: '@deepseek-ai/dsh-host-directory-picker-auto',
+        disabled: true,
+      }),
+    ])
+    expect(entries.filter(entry => entry.id === 'desktop-directory-picker')).toEqual([
+      expect.objectContaining({
+        name: '@deepseek-ai/dsh-desktop/sidecar-directory-picker',
+      }),
+    ])
+  })
+
   it('boots only the loopback dynamic-port Web profile without browser handoff', () => {
     const environment = { PATH: '/usr/bin' }
 

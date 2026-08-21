@@ -42,6 +42,7 @@ describe('Tauri macOS package verification plan', () => {
     const entries = [
       { id: '@deepseek-ai/dsh-client-modules', url: '/plugins/modules.js?rev=1' },
       { id: '@deepseek-ai/dsh-client-runtime', url: '/plugins/runtime.js?rev=2' },
+      { id: '@deepseek-ai/dsh-typert-registry', url: '/plugins/typert.js?rev=3' },
     ]
     const html = [
       '<html><head>',
@@ -54,6 +55,7 @@ describe('Tauri macOS package verification plan', () => {
     expect(validateHarnessBootHtml(html)).toEqual([
       '/plugins/modules.js?rev=1',
       '/plugins/runtime.js?rev=2',
+      '/plugins/typert.js?rev=3',
     ])
     expect(() => validateHarnessBootHtml(html.replace(JSON.stringify(entries), '[]')))
       .toThrow('no client plugin entries')

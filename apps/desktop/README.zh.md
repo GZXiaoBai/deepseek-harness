@@ -32,7 +32,7 @@ Harness 菜单可以手工检查更新或切换自动检查。Release 会发布 
 
 Harness 数据位于 `Harness/`，桌面日志在 `Logs/desktop.log` 下轮转，性能统计写入 `Logs/desktop-performance.json`，设置继续保存在 `desktop-settings.json`。替换或卸载应用会保留此目录；删除此目录会重置 Desktop 与 Harness 状态。
 
-原生外壳会立即显示内置启动页，只接受 sidecar 报告的精确回环来源，拒绝弹窗和非预期顶层导航，也不向 Web UI 开放 Tauri shell、文件系统或通用 invoke API。第二次启动只聚焦现有窗口。关闭时先通过协议请求 Harness dispose 并等待完成；Windows Job Object 与 macOS 进程组终止仅作为超时兜底。
+原生外壳会立即显示内置启动页，只接受 sidecar 报告的精确回环来源，拒绝弹窗和非预期顶层导航，也不向 Web UI 开放 Tauri shell、文件系统或通用 invoke API。第二次启动只聚焦现有窗口。在 Windows 上，点击窗口关闭按钮会保存窗口状态并隐藏到系统托盘；点击托盘图标或选择 **Show DeepSeek Harness** 可恢复窗口，选择托盘菜单中的 **Exit** 才会退出程序。退出时先通过协议请求 Harness dispose 并等待完成；Windows Job Object 与 macOS 进程组仅作为超时兜底。macOS 保持正常的窗口关闭行为。
 
 ## 验证
 
@@ -46,4 +46,4 @@ pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:macos
 # Windows: pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:windows
 ```
 
-Windows Server 2025 工作流会验证当前用户静默安装与卸载、快捷方式位置、零 reparse point、x64 PE 负载、预期未签名状态、严格回环启动、profile 初始化、单实例归属、关闭清理、数据保留、文件与体积限制以及 CI 时间限制。协议测试会保留包含中文和空格的路径，发布工作流还会证明原始更新包验签成功，而修改一个字节后的包验签失败。正式发布前，必须在开启 Defender 且未设置排除项的真实 Windows 11 x64 电脑上运行同一安装验收，并实际选择包含中文和空格的目录；Server 2025 不能替代 Windows 11 实机结果。
+Windows Server 2025 工作流会验证当前用户静默安装与卸载、快捷方式位置、零 reparse point、x64 PE 负载、预期未签名状态、严格回环启动、所有声明的客户端 bundle、profile 初始化、原生目录选择请求、内置 Agent preset、单实例归属、关闭到托盘行为、关闭清理、数据保留、文件与体积限制以及 CI 时间限制。协议测试会保留包含中文和空格的路径，发布工作流还会证明原始更新包验签成功，而修改一个字节后的包验签失败。正式发布前，必须在开启 Defender 且未设置排除项的真实 Windows 11 x64 电脑上运行同一安装验收，并实际选择包含中文和空格的目录；Server 2025 不能替代 Windows 11 实机结果。

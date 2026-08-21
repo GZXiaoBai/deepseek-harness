@@ -10,6 +10,7 @@ const verifier = await import(
   createTauriWindowsInstallPaths: (input: { appData: string; desktopDirectory: string }) => Record<string, string>
   createTauriWindowsVerifyPlan: (input: { desktopRoot: string; platform: string; arch: string }) => Record<string, string>
   findTauriNsisInstaller: (releaseDirectory: string) => Promise<string>
+  parseTauriDirectoryPickerRequests: (text: string) => string[]
   parseTauriDesktopLifecycle: (text: string) => { pid: number; startCount: number; url: URL }
   waitForTauriLifecycleOrExit: <T>(
     lifecycle: Promise<T>,
@@ -23,6 +24,7 @@ const {
   createTauriWindowsInstallPaths,
   createTauriWindowsVerifyPlan,
   findTauriNsisInstaller,
+  parseTauriDirectoryPickerRequests,
   parseTauriDesktopLifecycle,
   waitForTauriLifecycleOrExit,
   validatePerformanceStats,
@@ -78,6 +80,15 @@ describe('Tauri Windows package verification', () => {
     ].join('\n')
     expect(parseTauriDesktopLifecycle(log)).toEqual({ pid: 1234, startCount: 1, url: new URL('http://127.0.0.1:43210/') })
     expect(() => parseTauriDesktopLifecycle(log.replace('127.0.0.1', 'localhost'))).toThrow(/strict loopback/)
+  })
+
+  it('finds only versioned desktop directory-picker requests', () => {
+    const log = [
+      '1\tsidecar-stdout\tplugin directory-picker-request noise',
+      '2\tsidecar-stdout\tDSH_DESKTOP/1 {"type":"directory-picker-request","requestId":"picker-1"}',
+      '3\tsidecar-stdout\tDSH_DESKTOP/1 {"type":"directory-picker-result","requestId":"picker-1","path":null}',
+    ].join('\n')
+    expect(parseTauriDirectoryPickerRequests(log)).toEqual(['picker-1'])
   })
 
   it('reports process output when the native shell exits before creating its log', async () => {

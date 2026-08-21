@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod close_behavior;
 mod desktop_log;
 mod performance;
 mod protocol;
@@ -7,21 +8,65 @@ mod supervisor;
 mod updater;
 mod window_state;
 
+use close_behavior::{CloseRequestAction, close_request_action, smoke_exit_after_hide_delay};
 use supervisor::{DesktopRuntime, NavigationState};
 use tauri::{
     Manager, RunEvent, WindowEvent,
     webview::{NewWindowResponse, PageLoadEvent, WebviewWindowBuilder},
 };
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn setup_windows_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    };
+
+    let show = MenuItem::with_id(
+        app,
+        "tray_show",
+        "Show DeepSeek Harness",
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(app, "tray_quit", "Exit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::with_id("main-tray")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .tooltip("DeepSeek Harness")
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
 fn main() {
     performance::mark_process_started();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -45,7 +90,11 @@ fn main() {
                 .build(),
         )
         .on_menu_event(|app, event| {
-            if event.id().as_ref() == "open_logs" {
+            if event.id().as_ref() == "tray_show" {
+                show_main_window(app);
+            } else if event.id().as_ref() == "tray_quit" {
+                app.state::<DesktopRuntime>().begin_close(app.clone());
+            } else if event.id().as_ref() == "open_logs" {
                 let _ = open::that_detached(app.state::<DesktopRuntime>().log_directory());
             } else if event.id().as_ref() == "check_updates" {
                 updater::check_for_updates(app.clone(), true);
@@ -138,6 +187,8 @@ fn main() {
             )?;
             menu.append(&desktop_menu)?;
             app.set_menu(menu)?;
+            #[cfg(target_os = "windows")]
+            setup_windows_tray(app)?;
             if let Some(window) = app.get_webview_window("main") {
                 window_state::restore(&window, &app.state::<DesktopRuntime>().window_state_path());
             }
@@ -159,7 +210,27 @@ fn main() {
                 if let Some(window) = app.get_webview_window("main") {
                     window_state::save(&window, &app.state::<DesktopRuntime>().window_state_path());
                 }
-                app.state::<DesktopRuntime>().begin_close(app.clone());
+                match close_request_action(std::env::consts::OS) {
+                    CloseRequestAction::HideToTray => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                        if let Some(delay) = smoke_exit_after_hide_delay(
+                            std::env::var("DSH_DESKTOP_SMOKE_EXIT_AFTER_HIDE_MS")
+                                .ok()
+                                .as_deref(),
+                        ) {
+                            let app = app.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(delay);
+                                app.state::<DesktopRuntime>().begin_close(app.clone());
+                            });
+                        }
+                    }
+                    CloseRequestAction::BeginShutdown => {
+                        app.state::<DesktopRuntime>().begin_close(app.clone());
+                    }
+                }
             }
         }
         RunEvent::ExitRequested { api, .. } => {

@@ -1,4 +1,10 @@
-# Desktop-only host integration. The browser half remains the existing native
-# directory flow, while the node half delegates the chooser to Tauri.
+# Desktop-only host integration. Disable the adaptive host row because include
+# patches deliberately reject changing a row's package name, then mount the
+# Tauri-backed provider as its own Loader entry. The browser half remains the
+# existing native directory flow.
 - id: directory-picker
-  name: '@deepseek-ai/dsh-desktop/sidecar-directory-picker'
+  disabled: true
+
+- insert:
+    - id: desktop-directory-picker
+      name: '@deepseek-ai/dsh-desktop/sidecar-directory-picker'

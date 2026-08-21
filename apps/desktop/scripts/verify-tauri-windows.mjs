@@ -25,6 +25,7 @@ const MAX_APP_FILES = 500
 const MAX_APP_BYTES = 250 * 1024 * 1024
 const MAX_CI_PAGE_LOAD_MS = 10_000
 const MAX_CI_INSTALL_MS = 60_000
+const SMOKE_EXIT_AFTER_HIDE_MS = 1_500
 
 /** Resolves the native Tauri Windows acceptance paths. */
 export function createTauriWindowsVerifyPlan(input) {
@@ -67,16 +68,7 @@ export function parseTauriDesktopLifecycle(text) {
   const starts = [...text.matchAll(/\tdesktop\tsidecar spawned pid=(\d+)(?:\r?$)/gm)]
   const pid = Number(starts.at(-1)?.[1])
   if (!Number.isInteger(pid) || pid < 1) throw new Error('Tauri desktop log is missing a sidecar pid')
-  const frames = text.split(/\r?\n/).flatMap((line) => {
-    const marker = '\tsidecar-stdout\tDSH_DESKTOP/1 '
-    const offset = line.indexOf(marker)
-    if (offset < 0) return []
-    try {
-      return [JSON.parse(line.slice(offset + marker.length))]
-    } catch {
-      return []
-    }
-  })
+  const frames = parseTauriSidecarFrames(text)
   const ready = frames.findLast(frame => frame?.type === 'ready')
   if (typeof ready?.url !== 'string' || !/^http:\/\/127\.0\.0\.1:[0-9]+\/$/.test(ready.url)) {
     throw new Error('Tauri desktop log is missing a strict loopback ready URL')
@@ -87,6 +79,26 @@ export function parseTauriDesktopLifecycle(text) {
     throw new Error('Tauri desktop log is missing a strict loopback ready URL')
   }
   return { pid, startCount: starts.length, url }
+}
+
+function parseTauriSidecarFrames(text) {
+  return text.split(/\r?\n/).flatMap((line) => {
+    const marker = '\tsidecar-stdout\tDSH_DESKTOP/1 '
+    const offset = line.indexOf(marker)
+    if (offset < 0) return []
+    try {
+      return [JSON.parse(line.slice(offset + marker.length))]
+    } catch {
+      return []
+    }
+  })
+}
+
+/** Returns request ids emitted through the versioned desktop directory-picker protocol. */
+export function parseTauriDirectoryPickerRequests(text) {
+  return parseTauriSidecarFrames(text)
+    .filter(frame => frame?.type === 'directory-picker-request' && typeof frame.requestId === 'string')
+    .map(frame => frame.requestId)
 }
 
 /** Validates the complete native-process-to-page performance record. */
@@ -176,6 +188,8 @@ async function verifyLaunch(executable, cwd) {
       )
     }
 
+    await requireNativeDirectoryPicker(lifecycle.url, userData, primary.pid)
+
     const second = launch(executable, cwd, userData)
     const secondResult = await waitForExit(observeExit(second), STARTUP_TIMEOUT_MS, 'Second Tauri instance did not exit')
     if (secondResult.code !== 0) throw new Error(`Second Tauri instance exited with ${secondResult.code}`)
@@ -185,6 +199,11 @@ async function verifyLaunch(executable, cwd) {
     }
 
     await closeMainWindow(primary.pid)
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 200))
+    requireProcessAlive(primary.pid, 'Windows close request exited the Tauri application instead of hiding it')
+    requireProcessAlive(lifecycle.pid, 'Windows close request stopped the sidecar instead of hiding to tray')
+    const hiddenPage = await fetch(lifecycle.url, { signal: AbortSignal.timeout(500) })
+    if (!hiddenPage.ok) throw new Error(`Hidden Tauri application returned HTTP ${hiddenPage.status}`)
     await waitForExit(primaryExit, SHUTDOWN_TIMEOUT_MS, 'Tauri application did not close')
     primary = undefined
     await requireProcessGone(lifecycle.pid)
@@ -238,7 +257,11 @@ async function verifyInstalled(installer) {
 function launch(executable, cwd, userData) {
   const child = spawn(executable, [], {
     cwd,
-    env: { ...sanitizedEnvironment(), DSH_DESKTOP_USER_DATA_DIR: userData },
+    env: {
+      ...sanitizedEnvironment(),
+      DSH_DESKTOP_USER_DATA_DIR: userData,
+      DSH_DESKTOP_SMOKE_EXIT_AFTER_HIDE_MS: String(SMOKE_EXIT_AFTER_HIDE_MS),
+    },
     shell: false,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -304,6 +327,37 @@ async function requirePage(url, userData) {
   await requireHarnessFunctionality(url, workspacePath, STARTUP_TIMEOUT_MS)
 }
 
+async function requireNativeDirectoryPicker(url, userData, desktopPid) {
+  const rpcId = 'desktop-verify-host.pickDirectory'
+  const response = fetch(new URL('/api/host.pickDirectory', url), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId, method: 'host.pickDirectory', payload: {} }),
+    signal: AbortSignal.timeout(STARTUP_TIMEOUT_MS),
+  }).then(async (value) => {
+    if (!value.ok) throw new Error(`Harness host.pickDirectory returned HTTP ${value.status}`)
+    return await value.json()
+  })
+  const requestObserved = waitFor(async () => {
+    const log = await readFile(join(userData, 'Logs/desktop.log'), 'utf8')
+    const requests = parseTauriDirectoryPickerRequests(log)
+    if (requests.length === 0) throw new Error('no desktop directory-picker request')
+    return requests.at(-1)
+  }, 'Tauri sidecar did not delegate directory picking to its native parent')
+  await Promise.race([
+    requestObserved,
+    response.then((envelope) => {
+      throw new Error(`host.pickDirectory returned before the desktop protocol request: ${JSON.stringify(envelope)}`)
+    }),
+  ])
+  await closeNativeFolderDialog(desktopPid)
+  const envelope = await response
+  if (envelope?.type !== 'server-response' || envelope.rpcId !== rpcId
+    || envelope.result?.ok !== true || envelope.result.value?.path !== null) {
+    throw new Error(`Tauri native folder dialog did not report cancellation: ${JSON.stringify(envelope)}`)
+  }
+}
+
 async function summarizeTree(directory) {
   let files = 0
   let bytes = 0
@@ -346,6 +400,50 @@ async function requireUnsigned(path) {
 
 async function closeMainWindow(pid) {
   await powershell(`$p = Get-Process -Id ${pid} -ErrorAction Stop; if (-not $p.CloseMainWindow()) { throw 'No closeable window' }`)
+}
+
+async function closeNativeFolderDialog(pid) {
+  const script = [
+    'Add-Type @"',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'using System.Text;',
+    'public static class DshWindows {',
+    '  public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);',
+    '  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);',
+    '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);',
+    '  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);',
+    '  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);',
+    '}',
+    '"@',
+    '$target = [uint32]$env:DSH_PID',
+    '$closed = 0',
+    '[DshWindows]::EnumWindows({ param($hwnd, $unused)',
+    '  [uint32]$owner = 0',
+    '  [void][DshWindows]::GetWindowThreadProcessId($hwnd, [ref]$owner)',
+    '  if ($owner -ne $target) { return $true }',
+    '  $title = [Text.StringBuilder]::new(512)',
+    '  [void][DshWindows]::GetWindowText($hwnd, $title, $title.Capacity)',
+    '  if ($title.ToString() -eq "Select workspace folder") {',
+    '    [void][DshWindows]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)',
+    '    $script:closed += 1',
+    '  }',
+    '  return $true',
+    '}, [IntPtr]::Zero)',
+    'if ($closed -ne 1) { throw "Expected one native folder dialog, closed $closed" }',
+  ].join('\n')
+  await waitFor(
+    async () => await powershell(script, { DSH_PID: String(pid) }),
+    'Tauri native folder dialog did not open',
+  )
+}
+
+function requireProcessAlive(pid, message) {
+  try {
+    process.kill(pid, 0)
+  } catch {
+    throw new Error(message)
+  }
 }
 
 async function findUninstaller(directory) {

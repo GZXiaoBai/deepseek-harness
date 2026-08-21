@@ -3,7 +3,7 @@ const REQUIRED_BOOT_MODULES = [
   '@deepseek-ai/dsh-client-runtime',
 ]
 
-/** Returns the required parser-preload URLs from a complete Harness index. */
+/** Returns every client-bundle URL after validating the required parser preloads. */
 export function validateHarnessBootHtml(html) {
   const serialized = /globalThis\["__DSH_BOOT__"\] = (\{.*?\})<\/script>/.exec(html)?.[1]
   if (serialized === undefined) throw new Error('Harness boot graph is missing from the packaged index')
@@ -11,14 +11,18 @@ export function validateHarnessBootHtml(html) {
   if (!Array.isArray(graph.entries) || graph.entries.length === 0) {
     throw new Error('Harness boot graph has no client plugin entries')
   }
-  const urls = []
+  const urls = graph.entries.map((entry) => {
+    if (typeof entry?.id !== 'string' || typeof entry.url !== 'string') {
+      throw new Error('Harness boot graph contains an invalid client plugin entry')
+    }
+    return entry.url
+  })
   for (const id of REQUIRED_BOOT_MODULES) {
     const entry = graph.entries.find(candidate => candidate?.id === id)
     if (typeof entry?.url !== 'string') throw new Error(`Harness boot graph is missing ${id}`)
     if (!html.includes(`<script src="${entry.url}"></script>`)) {
       throw new Error(`Harness index did not parser-preload ${id}`)
     }
-    urls.push(entry.url)
   }
   return urls
 }
@@ -67,13 +71,13 @@ export async function requireHarnessFunctionality(url, workspacePath, timeoutMs,
   }
 }
 
-/** Requires the Harness index and both parser-preloaded bundles to answer successfully. */
+/** Requires the Harness index and every advertised client bundle to answer successfully. */
 export async function requireHarnessBoot(url, timeoutMs) {
   const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
   if (!response.ok) throw new Error(`Harness index returned HTTP ${response.status}`)
-  const preloadUrls = validateHarnessBootHtml(await response.text())
-  for (const preloadUrl of preloadUrls) {
-    const preload = await fetch(new URL(preloadUrl, url), { signal: AbortSignal.timeout(timeoutMs) })
-    if (!preload.ok) throw new Error(`Harness parser preload returned HTTP ${preload.status}: ${preloadUrl}`)
+  const bundleUrls = validateHarnessBootHtml(await response.text())
+  for (const bundleUrl of bundleUrls) {
+    const bundle = await fetch(new URL(bundleUrl, url), { signal: AbortSignal.timeout(timeoutMs) })
+    if (!bundle.ok) throw new Error(`Harness client bundle returned HTTP ${bundle.status}: ${bundleUrl}`)
   }
 }
