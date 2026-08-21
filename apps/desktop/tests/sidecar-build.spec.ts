@@ -31,6 +31,7 @@ const feasibilityModule = await import(
   pathToFileURL(join(import.meta.dirname, '../scripts/verify-sidecar-feasibility.mjs')).href,
 ) as {
   createFeasibilityFixtureFiles(): ReadonlyMap<string, string>
+  createFeasibilityProbeCwd(executable: string): string
 }
 
 describe('desktop SEA sidecar build', () => {
@@ -93,6 +94,11 @@ describe('desktop SEA sidecar build', () => {
     expect(fixture.get('index.mjs')).toContain("from 'dsh-private-fixture'")
     expect(fixture.get('index.mjs')).toContain('await fiber.dispose()')
     expect(fixture.get('node_modules/dsh-private-fixture/package.json')).toContain('dsh-private-fixture')
+  })
+
+  it('runs the probe outside the removable external-plugin directory', () => {
+    expect(feasibilityModule.createFeasibilityProbeCwd(join('/repo', 'bin', 'sidecar')))
+      .toBe(join('/repo', 'bin'))
   })
 
   it.each([

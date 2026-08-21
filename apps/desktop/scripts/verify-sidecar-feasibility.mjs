@@ -8,6 +8,11 @@ import { createNativeSidecarBuildPath, createSidecarBuildPlan } from './build-si
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 const PROBE_PREFIX = 'DSH_DESKTOP_PROBE/1 '
 
+/** Returns a stable probe cwd outside the removable external-plugin fixture. */
+export function createFeasibilityProbeCwd(executable) {
+  return dirname(executable)
+}
+
 /**
  * Returns the disk-only plugin fixture used to prove peer sharing and lifecycle.
  *
@@ -84,14 +89,14 @@ export async function verifyDesktopSidecarFeasibility(input = {}) {
     }
     console.log(`desktop sidecar feasibility: ${JSON.stringify(result)}`)
   } finally {
-    await rm(fixture, { recursive: true, force: true })
+    await rm(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   }
 }
 
 async function runProbe(executable, pluginPath, spawnHelperPath) {
   return await new Promise((resolveProbe, rejectProbe) => {
     const child = spawn(executable, ['--desktop-feasibility-probe', pluginPath], {
-      cwd: dirname(pluginPath),
+      cwd: createFeasibilityProbeCwd(executable),
       env: {
         ...process.env,
         NODE_OPTIONS: '',

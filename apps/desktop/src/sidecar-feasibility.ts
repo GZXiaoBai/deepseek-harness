@@ -37,6 +37,15 @@ export function createPtyProbeEnvironment(
   return selected
 }
 
+/** Appends one PTY output chunk and reports whether the real probe marker is complete. */
+export function appendPtyProbeOutput(
+  output: string,
+  data: string,
+): { output: string; complete: boolean } {
+  const combined = output + data
+  return { output: combined, complete: combined.includes('DSH_PTY_OK') }
+}
+
 /** Exercises native modules, VFS workers, and a disk plugin from inside the SEA. */
 export async function runDesktopSidecarFeasibilityProbe(
   externalPluginPath: string,
@@ -67,8 +76,23 @@ async function probeNodePty(): Promise<boolean> {
       env: environment,
     })
     let output = ''
-    terminal.onData((data) => { output += data })
+    let settled = false
+    terminal.onData((data) => {
+      const state = appendPtyProbeOutput(output, data)
+      output = state.output
+      if (!state.complete || settled) return
+      settled = true
+      try {
+        terminal.kill()
+      } catch (error) {
+        reject(new Error(`node-pty probe cleanup failed: ${String(error)}`))
+        return
+      }
+      resolve(true)
+    })
     terminal.onExit(({ exitCode }) => {
+      if (settled) return
+      settled = true
       if (exitCode === 0 && output.includes('DSH_PTY_OK')) resolve(true)
       else reject(new Error(`node-pty probe failed with exit ${exitCode}: ${output}`))
     })
