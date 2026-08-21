@@ -33,24 +33,24 @@ afterEach(async () => {
 describe('Tauri update manifest', () => {
   it('maps signed native artifacts to exact updater platform keys', () => {
     expect(createTauriUpdateManifest({
-      tag: 'desktop-v0.1.0-rc.8',
-      version: '0.1.0-rc.8',
+      tag: 'desktop-v0.1.1-rc.1',
+      version: '0.1.1-rc.1',
       notes: 'Release notes',
       pubDate: '2026-08-21T00:00:00.000Z',
-      windows: { artifactName: 'DeepSeek Harness Setup 0.1.0-rc.8-x64.exe', signature: 'win-sig\n' },
+      windows: { artifactName: 'DeepSeek Harness Setup 0.1.1-rc.1-x64.exe', signature: 'win-sig\n' },
       macos: { artifactName: 'DeepSeek Harness.app.tar.gz', signature: 'mac-sig\n' },
     })).toEqual({
-      version: '0.1.0-rc.8',
+      version: '0.1.1-rc.1',
       notes: 'Release notes',
       pub_date: '2026-08-21T00:00:00.000Z',
       platforms: {
         'windows-x86_64': {
           signature: 'win-sig',
-          url: 'https://github.com/GZXiaoBai/deepseek-harness/releases/download/desktop-v0.1.0-rc.8/DeepSeek%20Harness%20Setup%200.1.0-rc.8-x64.exe',
+          url: 'https://github.com/GZXiaoBai/deepseek-harness/releases/download/desktop-v0.1.1-rc.1/DeepSeek%20Harness%20Setup%200.1.1-rc.1-x64.exe',
         },
         'darwin-aarch64': {
           signature: 'mac-sig',
-          url: 'https://github.com/GZXiaoBai/deepseek-harness/releases/download/desktop-v0.1.0-rc.8/DeepSeek%20Harness.app.tar.gz',
+          url: 'https://github.com/GZXiaoBai/deepseek-harness/releases/download/desktop-v0.1.1-rc.1/DeepSeek%20Harness.app.tar.gz',
         },
       },
     })
@@ -72,15 +72,15 @@ describe('Tauri update manifest', () => {
     temporaryDirectories.push(directory)
     await mkdir(directory, { recursive: true })
     await Promise.all([
-      writeFile(join(directory, 'DeepSeek Harness Setup 0.1.0-rc.8-x64.exe'), ''),
-      writeFile(join(directory, 'DeepSeek Harness Setup 0.1.0-rc.8-x64.exe.sig'), 'win-signature\n'),
+      writeFile(join(directory, 'DeepSeek Harness Setup 0.1.1-rc.1-x64.exe'), ''),
+      writeFile(join(directory, 'DeepSeek Harness Setup 0.1.1-rc.1-x64.exe.sig'), 'win-signature\n'),
       writeFile(join(directory, 'DeepSeek Harness.app.tar.gz'), ''),
       writeFile(join(directory, 'DeepSeek Harness.app.tar.gz.sig'), 'mac-signature\n'),
     ])
     const output = await writeTauriUpdateManifest({
       releaseDirectory: directory,
-      tag: 'desktop-v0.1.0-rc.8',
-      version: '0.1.0-rc.8',
+      tag: 'desktop-v0.1.1-rc.1',
+      version: '0.1.1-rc.1',
       pubDate: '2026-08-21T00:00:00.000Z',
     })
     const manifest = JSON.parse(await readFile(output, 'utf8')) as unknown as {

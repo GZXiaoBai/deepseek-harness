@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-17-windows-desktop-app.md
 2026-08-17-windows-desktop-app.md: 34a1ce93b4e34e504721591ad4ccd82ade39c06a
-2026-08-17-windows-desktop-app.zh.md: 573e07bce1d9db7d5b943dbaf71e56db9676eff9
+2026-08-17-windows-desktop-app.zh.md: dadf9aa03190d5f21475920512d7696e88ef0130

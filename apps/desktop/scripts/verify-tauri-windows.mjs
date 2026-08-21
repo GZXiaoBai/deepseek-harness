@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, resolve, win32 } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
 
 const PRODUCT_NAME = 'DeepSeek Harness'
@@ -161,7 +162,7 @@ async function verifyLaunch(executable, cwd) {
     primary = launch(executable, cwd, userData)
     const primaryExit = observeExit(primary)
     lifecycle = await waitForLifecycle(userData)
-    await requirePage(lifecycle.url)
+    await requirePage(lifecycle.url, userData)
     await requireFile(join(userData, 'Harness/profiles/web/cordis.yml'), 'Packaged Web profile was not initialized')
     const initialStats = await waitForPerformance(userData, false)
     if (initialStats.pageLoadedMs > MAX_CI_PAGE_LOAD_MS) {
@@ -265,12 +266,11 @@ async function waitFor(operation, label) {
   throw new Error(`${label}: ${String(lastError)}`)
 }
 
-async function requirePage(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(STARTUP_TIMEOUT_MS) })
-  const html = await response.text()
-  if (response.status !== 200 || !/<title>\s*DeepSeek Harness\s*<\/title>/.test(html)) {
-    throw new Error(`Unexpected Tauri Web UI response: ${response.status}`)
-  }
+async function requirePage(url, userData) {
+  await requireHarnessBoot(url, STARTUP_TIMEOUT_MS)
+  const workspacePath = join(userData, '验证 工作区')
+  await mkdir(workspacePath, { recursive: true })
+  await requireHarnessFunctionality(url, workspacePath, STARTUP_TIMEOUT_MS)
 }
 
 async function summarizeTree(directory) {

@@ -10,15 +10,15 @@ Windows 11 用户需要与 Apple Silicon 包相同的个人使用 DeepSeek Harne
 
 ## 决策
 
-`@deepseek-ai/dsh-desktop` 有两个显式原生目标：`darwin-arm64` 与 `win32-x64`。其他所有平台与架构都会被拒绝。Windows 目标复用 [macOS 桌面决策](2026-08-16-macos-desktop-app.md)定义的现有 Electron 主进程、BrowserWindow 安全偏好、导航策略、原生编辑快捷键、窗口状态、严格回环 Web UI、单实例交接、启动恢复和 `userData/Harness` 数据分离。打包只在匹配的原生宿主上运行；不支持 macOS 到 Windows 的交叉打包或 Wine。
+`@deepseek-ai/dsh-desktop` 有两个显式原生目标：`darwin-arm64` 与 `win32-x64`。其他所有平台与架构都会被拒绝。Windows 目标复用 [macOS 桌面决策](2026-08-16-macos-desktop-app.zh.md)定义的现有 Electron 主进程、BrowserWindow 安全偏好、导航策略、原生编辑快捷键、窗口状态、严格回环 Web UI、单实例交接、启动恢复和 `userData/Harness` 数据分离。打包只在匹配的原生宿主上运行；不支持 macOS 到 Windows 的交叉打包或 Wine。
 
 Windows 不通过 shell 启动 Harness 后端，并设置 `detached: false` 与 `windowsHide: true`。Desktop 控制器只拥有自己创建的根进程及其后代树。关闭时会调用 `taskkill.exe /PID <pid> /T /F`，等待进程与监听器消失，并保留可见的清理失败。只有在清理开始前已经观察到根进程退出时，才会跳过该命令；已调用命令返回的错误仍属于清理失败，即使根进程同时退出也不例外。清理失败永远不会覆盖更早的启动诊断。
 
 ## 运行时与安装程序边界
 
-共享的[封闭运行时部署根](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)仍是依赖真源。Windows 暂存使用 pnpm 提升式 linker 和注入式工作区包，禁用依赖生命周期脚本，运行唯一已审查的子进程修复，针对 `win32-x64` 重建，并只保留 `node-pty/prebuilds/win32-x64`。最终运行时不得包含符号链接、junction 或其他 reparse point。所有 PE 文件都会被直接解析，且必须声明 COFF machine `0x8664`；CLI、Web 前端、配置、ConPTY、koffi 与回环 Web 启动都会在 Electron 下实际执行。
+共享的[封闭运行时部署根](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.zh.md)仍是依赖真源。Windows 暂存使用 pnpm 提升式 linker 和注入式工作区包，禁用依赖生命周期脚本，运行唯一已审查的子进程修复，针对 `win32-x64` 重建，并只保留 `node-pty/prebuilds/win32-x64`。最终运行时不得包含符号链接、junction 或其他 reparse point。所有 PE 文件都会被直接解析，且必须声明 COFF machine `0x8664`；CLI、Web 前端、配置、ConPTY、koffi 与回环 Web 启动都会在 Electron 下实际执行。
 
-Electron Builder 生成 `win-unpacked` 与 `DeepSeek Harness Setup <version>-x64.exe`。暂存会在打包前从运行时剔除 TypeScript 源码、source map 与重建残留，安装文件数大致减半；向导式 NSIS 安装程序默认按用户安装、禁止提权、允许选择安装目录、会创建桌面和开始菜单快捷方式、安装后不运行应用，并在卸载时保留应用数据。标准 NSIS 卸载程序是已安装根目录中唯一经过审查的 x86 PE；验证要求其精确路径、COFF machine `0x014c` 和未签名状态，同时每个应用负载 PE 均保持 x64。个人包有意保持未签名；证书、MSIX 与 Windows ARM64 仍不属于本决策范围，更新来自[桌面更新器决策](2026-08-18-desktop-updater.md)。
+Electron Builder 生成 `win-unpacked` 与 `DeepSeek Harness Setup <version>-x64.exe`。暂存会在打包前从运行时剔除 TypeScript 源码、source map 与重建残留，安装文件数大致减半；向导式 NSIS 安装程序默认按用户安装、禁止提权、允许选择安装目录、会创建桌面和开始菜单快捷方式、安装后不运行应用，并在卸载时保留应用数据。标准 NSIS 卸载程序是已安装根目录中唯一经过审查的 x86 PE；验证要求其精确路径、COFF machine `0x014c` 和未签名状态，同时每个应用负载 PE 均保持 x64。个人包有意保持未签名；证书、MSIX 与 Windows ARM64 仍不属于本决策范围，更新来自[桌面更新器决策](2026-08-18-desktop-updater.zh.md)。
 
 ## 验证
 

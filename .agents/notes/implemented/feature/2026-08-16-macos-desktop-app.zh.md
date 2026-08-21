@@ -10,9 +10,9 @@ DeepSeek Harness 通过 Host/Web 组合提供浏览器界面。希望获得应�
 
 ## 决策
 
-`@deepseek-ai/dsh-desktop` 是一个面向搭载 macOS 14 或更高版本的 Apple Silicon Mac 的 Electron 包装层。它使用固定的 `web --host 127.0.0.1 --port 0` 参数，把已暂存的 `@deepseek-ai/dsh` CLI（命令行界面）作为一个分离式后端进程启动，等待获得严格的回环 URL 与 HTTP 健康响应，再在应用窗口中打开同一来源。`@deepseek-ai/dsh-host-webserver` 按 [GUI 分层决策](../architecture/2026-07-19-gui-layering-and-rpc-protocol.md)继续拥有 HTTP 服务、API 路由、前端交付以及浏览器可见启动职责。
+`@deepseek-ai/dsh-desktop` 是一个面向搭载 macOS 14 或更高版本的 Apple Silicon Mac 的 Electron 包装层。它使用固定的 `web --host 127.0.0.1 --port 0` 参数，把已暂存的 `@deepseek-ai/dsh` CLI（命令行界面）作为一个分离式后端进程启动，等待获得严格的回环 URL 与 HTTP 健康响应，再在应用窗口中打开同一来源。`@deepseek-ai/dsh-host-webserver` 按 [GUI 分层决策](../architecture/2026-07-19-gui-layering-and-rpc-protocol.zh.md)继续拥有 HTTP 服务、API 路由、前端交付以及浏览器可见启动职责。
 
-[Windows 桌面决策](2026-08-17-windows-desktop-app.md)复用这个包装层及其 Web、渲染器、导航、数据分离与单实例边界，只替换目标特定的进程树、暂存、二进制审计和安装程序行为。
+[Windows 桌面决策](2026-08-17-windows-desktop-app.zh.md)复用这个包装层及其 Web、渲染器、导航、数据分离与单实例边界，只替换目标特定的进程树、暂存、二进制审计和安装程序行为。
 
 采用 `file://` 且由 IPC 支持 host 的应用仍属于一套独立架构。它必须替代 HTTP 服务器的资源、请求、生命周期和安全职责，才能替代回环 HTTP；两种传输方式并非别名关系。
 
@@ -22,7 +22,7 @@ DeepSeek Harness 通过 Host/Web 组合提供浏览器界面。希望获得应�
 
 Desktop 应用只拥有自己创建的分离式进程组。退出、重试、应用信号和意外退出共用一个关闭屏障：所拥有的进程组先收到 `SIGTERM`，可在 5 秒内退出，否则会收到 `SIGKILL`。应用既不发现，也不向无关 Harness 进程发送信号。
 
-打包后端使用[封闭运行时决策](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)所述的私有已验证依赖部署。打包目标固定为 `darwin-arm64`，会拒绝其他所有宿主目标、审计所有 Mach-O 文件是否为 arm64，从已暂存运行时中剔除源码与 source map，并在签名前把已包含的运行时复制到 App 内。所有交付的代码对象均使用带 Hardened Runtime 的 ad-hoc 签名；原生模块只会收到已审查的 JIT、未签名可执行内存和库验证 entitlements。此个人构建未经公证；更新来自[桌面更新器决策](2026-08-18-desktop-updater.md)。
+打包后端使用[封闭运行时决策](../architecture/2026-08-17-desktop-closed-runtime-deploy-root.zh.md)所述的私有已验证依赖部署。打包目标固定为 `darwin-arm64`，会拒绝其他所有宿主目标、审计所有 Mach-O 文件是否为 arm64，从已暂存运行时中剔除源码与 source map，并在签名前把已包含的运行时复制到 App 内。所有交付的代码对象均使用带 Hardened Runtime 的 ad-hoc 签名；原生模块只会收到已审查的 JIT、未签名可执行内存和库验证 entitlements。此个人构建未经公证；更新来自[桌面更新器决策](2026-08-18-desktop-updater.zh.md)。
 
 ## 数据与生命周期边界
 

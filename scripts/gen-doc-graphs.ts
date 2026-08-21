@@ -190,6 +190,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Configuration carries references to secrets; providers own the values. Consumers resolve per operation, so a rotated credential reaches the very next request; the web gateway exposes value-free views and write-only storage.',
   },
   {
+    key: 'authorization',
+    pkg: 'authorization',
+    title: 'Authorization flow registry',
+    mode: 'seam',
+    implementations: [],
+    consumers: ['llm-pi-ai'],
+    note: 'Flows are registered by the plugin that knows how to obtain one credential and keyed by the record they write; the seam owns the conversation and the one-attempt-per-key lifecycle, never the protocol.',
+  },
+  {
     key: 'sessionTelemetry',
     pkg: 'session-telemetry',
     title: 'Session telemetry seam',
@@ -537,6 +546,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'core',
     consumers: ['hmr'],
     note: 'Composes the __DSH_BOOT__ entry graph from an incremental dsh.client scan, serves plugin bundles, and notifies rebuilt/graph-changed subscribers.',
+  },
+  {
+    key: 'clientPackageJsonResolver',
+    pkg: 'modules',
+    title: 'Embedded client package metadata resolver',
+    mode: 'core',
+    note: 'An optional host-provided lookup lets client-modules read package manifests embedded outside the profile filesystem; names the host does not own retain profile-anchored resolution.',
   },
   {
     key: 'workflowEngine',

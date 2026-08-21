@@ -1,14 +1,22 @@
 import { spawn } from 'node:child_process'
-import { access, lstat, mkdtemp, opendir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { access, lstat, mkdir, mkdtemp, opendir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
+
+export {
+  requireHarnessFunctionality,
+  validateHarnessAgentPresetResponse,
+  validateHarnessBootHtml,
+} from './harness-boot-audit.mjs'
 
 const DESKTOP_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const MAX_APP_FILES = 500
 const MAX_APP_BYTES = 250 * 1024 * 1024
 const MAX_PAGE_LOAD_MS = 10_000
 const STARTUP_TIMEOUT_MS = 20_000
+const SMOKE_EXIT_AFTER_READY_MS = 6_000
 
 /** Resolves the host-native macOS acceptance paths. */
 export function createTauriMacosVerifyPlan(input) {
@@ -21,6 +29,7 @@ export function createTauriMacosVerifyPlan(input) {
     releaseDirectory,
     app,
     executable: join(app, 'Contents/MacOS/deepseek-harness-desktop'),
+    smokeExitAfterReadyMs: SMOKE_EXIT_AFTER_READY_MS,
   }
 }
 
@@ -42,7 +51,7 @@ export async function verifyTauriMacosPackage() {
   if (!details.stderr.includes('Signature=adhoc') || !/flags=.*runtime/.test(details.stderr)) {
     throw new Error('macOS App is not ad-hoc signed with Hardened Runtime')
   }
-  const performance = await verifyLaunch(plan.executable)
+  const performance = await verifyLaunch(plan.executable, plan.smokeExitAfterReadyMs)
   const stats = {
     appFiles: payload.files,
     appBytes: payload.bytes,
@@ -72,7 +81,7 @@ async function summarizeAndAudit(root) {
   return { files, bytes }
 }
 
-async function verifyLaunch(executable) {
+async function verifyLaunch(executable, smokeExitAfterReadyMs) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-tauri-macos-'))
   const userData = join(root, '用户 数据')
   const child = spawn(executable, [], {
@@ -80,7 +89,7 @@ async function verifyLaunch(executable) {
     env: {
       ...sanitizedEnvironment(),
       DSH_DESKTOP_USER_DATA_DIR: userData,
-      DSH_DESKTOP_SMOKE_EXIT_AFTER_READY_MS: '250',
+      DSH_DESKTOP_SMOKE_EXIT_AFTER_READY_MS: String(smokeExitAfterReadyMs),
     },
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -89,7 +98,11 @@ async function verifyLaunch(executable) {
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', chunk => { stderr += chunk })
   try {
-    const result = await waitForExit(child, STARTUP_TIMEOUT_MS)
+    const boot = verifyHarnessBoot(userData)
+    const [result] = await Promise.all([
+      waitForExit(child, STARTUP_TIMEOUT_MS),
+      boot,
+    ])
     if (result.code !== 0 || result.signal !== null) {
       throw new Error(`Packaged App exited with ${result.signal ?? `code ${result.code}`}: ${stderr.trim()}`)
     }
@@ -106,6 +119,28 @@ async function verifyLaunch(executable) {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
     await rm(root, { recursive: true, force: true })
   }
+}
+
+async function verifyHarnessBoot(userData) {
+  const logPath = join(userData, 'Logs/desktop.log')
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS
+  let readyUrl
+  while (Date.now() < deadline) {
+    try {
+      const log = await readFile(logPath, 'utf8')
+      const matches = [...log.matchAll(/"type":"ready","url":"(http:\/\/127\.0\.0\.1:\d+\/)"/g)]
+      readyUrl = matches.at(-1)?.[1]
+      if (readyUrl !== undefined) break
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+    await new Promise(resolveWait => setTimeout(resolveWait, 25))
+  }
+  if (readyUrl === undefined) throw new Error('Packaged App did not report a strict ready URL')
+  await requireHarnessBoot(readyUrl, STARTUP_TIMEOUT_MS)
+  const workspacePath = join(userData, '验证 工作区')
+  await mkdir(workspacePath, { recursive: true })
+  await requireHarnessFunctionality(readyUrl, workspacePath, STARTUP_TIMEOUT_MS)
 }
 
 async function* walk(directory) {

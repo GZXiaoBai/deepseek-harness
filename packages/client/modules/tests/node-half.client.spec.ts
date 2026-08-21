@@ -8,9 +8,14 @@ import { pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { renderIndexInjections, type WebServer, type WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import * as modulesClient from '../src/client/index.ts'
-import { ClientModuleRegistry, injectBootManifest, orderByModuleGraph } from '../src/index.ts'
+import {
+  ClientModuleRegistry,
+  bootInjections,
+  createClientPackageJsonResolver,
+  orderByModuleGraph,
+} from '../src/index.ts'
 import type { ClientModuleLoaderTarget, WebBootEntry, WebBootGraph } from '../src/client/index.ts'
 
 const MODULES_ID = '@deepseek-ai/dsh-client-modules'
@@ -81,9 +86,12 @@ function construct(packageNames: string[]): ClientModuleRegistry {
   return constructWithRoute(packageNames).service
 }
 
-/** Execute the exact first inline script emitted by the Host HTML transform. */
+/** Execute the exact first inline script emitted by the Host boot rows. */
 function injectedFacade(graph: WebBootGraph): { html: string; target: ClientModuleLoaderTarget } {
-  const html = injectBootManifest('<html><head></head><body><script type="module" src="/index.js"></script></body></html>', graph)
+  const html = renderIndexInjections(
+    '<html><head></head><body><script type="module" src="/index.js"></script></body></html>',
+    bootInjections(graph),
+  )
   const source = /<head><script>([\s\S]*?)<\/script>/.exec(html)?.[1]
   if (source === undefined) throw new Error('missing injected ModuleLoader facade script')
   const window: { __ModuleLoader__?: ClientModuleLoaderTarget } = {}
@@ -107,7 +115,7 @@ describe('HTML bootstrap facade', () => {
     const facadeAt = html.indexOf('window.__ModuleLoader__=')
     const modulesAt = html.indexOf('<script src="/plugins/modules.js?rev=m"></script>')
     const runtimeAt = html.indexOf('<script src="/plugins/runtime.js?rev=r"></script>')
-    const graphAt = html.indexOf('window.__DSH_BOOT__ = ')
+    const graphAt = html.indexOf('globalThis["__DSH_BOOT__"] = ')
     const entryAt = html.indexOf('<script type="module" src="/index.js"></script>')
     expect([facadeAt, modulesAt, runtimeAt, graphAt, entryAt]).toEqual([...new Set([
       facadeAt, modulesAt, runtimeAt, graphAt, entryAt,
@@ -161,6 +169,28 @@ describe('HTML bootstrap facade', () => {
 })
 
 describe('client bundle activation', () => {
+  it('resolves host packages and profile-installed external packages', () => {
+    const profileName = '@fixture/profile-client'
+    const runtimeName = '@fixture/runtime-client'
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-client-modules-resolver-')))
+    const profileRoot = join(root, 'profile')
+    const runtimeRoot = join(root, 'runtime')
+    const profileManifest = join(profileRoot, 'node_modules', ...profileName.split('/'), 'package.json')
+    const runtimeManifest = join(runtimeRoot, 'node_modules', ...runtimeName.split('/'), 'package.json')
+    mkdirSync(dirname(profileManifest), { recursive: true })
+    mkdirSync(dirname(runtimeManifest), { recursive: true })
+    writeFileSync(profileManifest, JSON.stringify({ name: profileName }))
+    writeFileSync(runtimeManifest, JSON.stringify({ name: runtimeName }))
+    const resolvePackageJson = createClientPackageJsonResolver(
+      pathToFileURL(join(profileRoot, 'package.json')).href,
+      { resolve: spec => spec === runtimeName ? runtimeManifest : undefined },
+    )
+
+    expect(resolvePackageJson(profileName)).toBe(profileManifest)
+    expect(resolvePackageJson(runtimeName)).toBe(runtimeManifest)
+    expect(() => resolvePackageJson('@fixture/missing')).toThrow('Cannot find module')
+  })
+
   it('allows sibling dsh roles', () => {
     const currentName = '@fixture/current-client-field'
     const clientPath = writePackage(currentName, {

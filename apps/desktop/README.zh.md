@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-本包使用 Tauri 2 构建个人使用的 DeepSeek Harness 桌面应用，支持搭载 macOS 14 或更高版本的 Apple Silicon Mac 与 Windows 11 x64 电脑。原生外壳保留现有 Web UI，并以 Node 24 单文件 sidecar 运行 Harness Web 后端，只监听私有的 `http://127.0.0.1:<ephemeral-port>/` 来源。[Tauri 与 sidecar 决策](../../.agents/notes/implemented/architecture/2026-08-21-tauri-desktop-sidecar.md)负责运行时划分；Electron 的 [macOS](../../.agents/notes/implemented/feature/2026-08-16-macos-desktop-app.md)、[Windows](../../.agents/notes/implemented/feature/2026-08-17-windows-desktop-app.md)和[封闭运行时](../../.agents/notes/implemented/architecture/2026-08-17-desktop-closed-runtime-deploy-root.md)记录在最终 Windows 验收完成、回退实现删除前仍然有效。
+本包使用 Tauri 2 构建个人使用的 DeepSeek Harness 桌面应用，支持搭载 macOS 14 或更高版本的 Apple Silicon Mac 与 Windows 11 x64 电脑。原生外壳保留现有 Web UI，并以 Node 24 单文件 sidecar 运行 Harness Web 后端，只监听私有的 `http://127.0.0.1:<ephemeral-port>/` 来源。[Tauri 与 sidecar 决策](../../.agents/notes/implemented/architecture/2026-08-21-tauri-desktop-sidecar.zh.md)负责运行时划分；Electron 的 [macOS](../../.agents/notes/implemented/feature/2026-08-16-macos-desktop-app.zh.md)、[Windows](../../.agents/notes/implemented/feature/2026-08-17-windows-desktop-app.zh.md)和[封闭运行时](../../.agents/notes/implemented/architecture/2026-08-17-desktop-closed-runtime-deploy-root.zh.md)记录在最终 Windows 验收完成、回退实现删除前仍然有效。
 
 ## 支持目标与构建
 

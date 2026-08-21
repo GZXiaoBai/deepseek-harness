@@ -122,6 +122,20 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /**
+ * Whether `path` names an existing directory.
+ * @param path - Absolute path to test.
+ * @returns true when the path resolves to a directory.
+ */
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    // A listed child can disappear before stat; it no longer contributes a preset.
+    return false
+  }
+}
+
+/**
  * Scan one root for preset directories.
  *
  * An absent root yields no presets rather than throwing: the user root does
@@ -138,17 +152,20 @@ async function isFile(path: string): Promise<boolean> {
  */
 export async function scanRoot(root: PresetRoot): Promise<AgentPreset[]> {
   const dir = resolve(expandHomePath(root.path))
-  let children
+  let children: string[]
   try {
-    children = await readdir(dir, { withFileTypes: true })
+    // pkg's SEA VFS implements name enumeration but not Node Dirent methods.
+    // A separate stat keeps the same behavior on disk and inside the VFS.
+    children = await readdir(dir)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw new Error(`agent-presets: cannot read preset root ${dir}: ${String(error)}`, { cause: error })
   }
   const found: AgentPreset[] = []
   for (const child of children) {
-    if (!child.isDirectory() || !PRESET_ID.test(child.name)) continue
-    const directory = join(dir, child.name)
+    if (!PRESET_ID.test(child)) continue
+    const directory = join(dir, child)
+    if (!await isDirectory(directory)) continue
     const path = join(directory, COMPOSITION_FILE)
     const broken = await isFile(path)
       ? await compositionProblem(path)
@@ -157,7 +174,7 @@ export async function scanRoot(root: PresetRoot): Promise<AgentPreset[]> {
     // still mounts, it just shows its id.
     const metadata = await readPresetMetadata(directory)
     found.push({
-      id: child.name, trust: root.trust, path, ...metadata,
+      id: child, trust: root.trust, path, ...metadata,
       ...broken === undefined ? {} : { broken },
     })
   }

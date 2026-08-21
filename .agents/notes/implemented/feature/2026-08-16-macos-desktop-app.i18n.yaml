@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-16-macos-desktop-app.md
 2026-08-16-macos-desktop-app.md: c763cb4118a6bb279a53ca6042d5f7ca460bfff6
-2026-08-16-macos-desktop-app.zh.md: 9f33d8ff8af0c0ac071bceb5e3f571d34231e3e3
+2026-08-16-macos-desktop-app.zh.md: 51dc3523ada8413e9e2113f41fadaa042fa0c63c

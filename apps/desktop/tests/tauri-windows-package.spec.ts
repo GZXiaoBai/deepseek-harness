@@ -46,7 +46,7 @@ describe('Tauri Windows package verification', () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-tauri-nsis-'))
     directories.push(directory)
     await expect(findTauriNsisInstaller(directory)).rejects.toThrow(/found 0/)
-    const installer = join(directory, 'DeepSeek Harness Setup 0.1.0-rc.8-x64.exe')
+    const installer = join(directory, 'DeepSeek Harness Setup 0.1.1-rc.1-x64.exe')
     await writeFile(installer, '')
     await expect(findTauriNsisInstaller(directory)).resolves.toBe(installer)
     await writeFile(join(directory, 'stale.exe'), '')

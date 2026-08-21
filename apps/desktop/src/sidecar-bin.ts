@@ -8,9 +8,24 @@ import { DesktopSidecarChannel } from './sidecar-channel.ts'
 import { installDesktopSidecarChannel } from './sidecar-directory-picker.ts'
 import { formatSidecarError } from './sidecar-error.ts'
 import { createDesktopLoaderInternalProxy, createPackagedSpecifierResolver } from './sidecar-loader.ts'
-import { createDesktopModuleMappings, installDesktopModuleResolver } from './sidecar-module-resolver.ts'
+import {
+  createDesktopModuleMappings,
+  createDesktopPackageJsonMappings,
+  installDesktopModuleResolver,
+  resolveDesktopShippedPresetRoot,
+} from './sidecar-module-resolver.ts'
 import { isPackagedDesktopSidecar, PACKAGED_DESKTOP_MODULES } from './sidecar-packaged-modules.ts'
 import { buildDesktopSidecarProfileOptions, desktopSidecarReadyEvents } from './sidecar-startup.ts'
+
+interface DesktopClientPackageJsonResolver {
+  resolve(specifier: string): string | undefined
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    clientPackageJsonResolver: DesktopClientPackageJsonResolver
+  }
+}
 
 const startedAt = Date.now()
 const packagedDependencies = isPackagedDesktopSidecar(
@@ -24,6 +39,14 @@ const resolvePackagedSpecifier = createPackagedSpecifierResolver(
   packagedDependencies,
   specifier => import.meta.resolve(specifier),
 )
+const packagedPackageJson = createDesktopPackageJsonMappings(
+  [...packagedDependencies, '@deepseek-ai/dsh'],
+  specifier => import.meta.resolve(specifier),
+)
+const shippedPresetRoot = resolveDesktopShippedPresetRoot(packagedPackageJson)
+const clientPackageJsonResolver: DesktopClientPackageJsonResolver = {
+  resolve: specifier => packagedPackageJson.get(specifier),
+}
 const moduleHooks = installDesktopModuleResolver(createDesktopModuleMappings(
   packagedDependencies,
   specifier => import.meta.resolve(specifier),
@@ -81,8 +104,14 @@ async function runDesktopSidecar(): Promise<void> {
   try {
     const patchPath = fileURLToPath(new URL('../sidecar/cordis.patch.yml', import.meta.url))
     profileRun = runProfile({
-      ...buildDesktopSidecarProfileOptions(loadLayeredEnv('dsh'), patchPath, import.meta.url),
+      ...buildDesktopSidecarProfileOptions(
+        loadLayeredEnv('dsh'),
+        patchPath,
+        import.meta.url,
+        shippedPresetRoot,
+      ),
       prepareHost: (ctx) => {
+        ctx.provide('clientPackageJsonResolver', clientPackageJsonResolver)
         const internal = ctx.loader.internal
         if (internal === undefined) throw new Error('desktop sidecar requires the Node internal module loader')
         ctx.loader.internal = createDesktopLoaderInternalProxy(internal, resolvePackagedSpecifier)

@@ -12,7 +12,7 @@ Electron 桌面包在 Windows 上安装超过 32,000 个文件，总体积约 61
 
 Tauri 2 负责原生窗口、菜单、导航策略、单实例聚焦、窗口状态、更新、目录对话框和后端进程监管。现有 Web UI 保持不变，不获得 Tauri shell、文件系统或通用 invoke 权限。窗口先显示内置的无脚本启动页，只在后端报告精确的 `http://127.0.0.1:<port>/` 来源后导航；非预期导航和所有弹窗都会被拒绝，非回环 HTTP(S) 链接则交给系统浏览器。
 
-`@yao-pkg/pkg --sea` 把 Node 24 Web 后端、内置插件、配置和 Web 静态资源打进一个目标平台专用的可执行文件。目标原生的 `node-pty`、ripgrep 与 macOS spawn helper 仍是相邻的普通二进制文件。sidecar 排除开发源码、source map、测试和文档。启动时的模块解析 hook 把打包后的 Cordis 与 Harness Service Definition peer 映射到 VFS 单例，同时允许 profile 插件及其私有依赖从磁盘解析；打包 profile 不会创建指向 VFS 的链接。
+`@yao-pkg/pkg --sea` 把 Node 24 Web 后端、内置插件、配置和 Web 静态资源打进一个目标平台专用的可执行文件。目标原生的 `node-pty`、ripgrep 与 macOS spawn helper 仍是相邻的普通二进制文件。sidecar 排除开发源码、source map、测试和文档。启动时的模块解析 hook 把打包后的 Cordis 与 Harness Service Definition peer 映射到 VFS 单例，同时允许 profile 插件及其私有依赖从磁盘解析；打包 profile 不会创建指向 VFS 的链接。同一个宿主适配器依据预计算的 VFS 包根目录，为客户端模块扫描解析每个内置包的 manifest；不在打包清单中的名称仍使用以 profile 为锚点的解析器。桌面启动器从打包的 `@deepseek-ai/dsh` manifest 推导随附 Agent preset 根目录，而不依赖导入模块的 `import.meta.url`；pkg 会把后者报告为 SEA 入口 URL。preset 发现过程先枚举子项名称，再分别执行 stat，因为 pkg VFS 不提供完整的 Node `Dirent` 方法。
 
 版本化行协议在 stdout 使用 `DSH_DESKTOP/1 ` 前缀。JSON 事件报告启动阶段、就绪、致命错误、停止和原生目录对话框请求；stdin 传递 shutdown 与对话框结果。没有前缀的输出只作为插件日志，不能被识别为控制消息。因此两个目标的目录选择都使用 Tauri 对话框，不再执行曾导致文件夹选择进程退出的 Koffi Win32 dialog worker。
 
@@ -22,7 +22,7 @@ Windows 先以挂起状态创建 sidecar，把它加入设置了 `KILL_ON_JOB_CL
 
 Tauri NSIS 包按当前用户安装，不提权，使用 Windows 11 系统 WebView2，只创建开始菜单快捷方式，并在卸载时保留 `%APPDATA%\DeepSeek Harness`。macOS 包只支持 Apple Silicon，使用带 Hardened Runtime 的 ad-hoc 签名，但不公证。两个目标都复用 Electron 数据目录和设置。Tauri 更新包使用独立 minisign 密钥签名；公钥随配置交付，私钥只存在于发布密钥。应用代码签名与更新签名相互独立，个人 Windows 构建继续保持未签名。
 
-Electron 实现在 Windows Server 2025 CI 与真实 Windows 11 x64 电脑通过同一套安装、目录选择、启动和关闭验收前仍可使用。它的 [macOS](../feature/2026-08-16-macos-desktop-app.md)、[Windows](../feature/2026-08-17-windows-desktop-app.md)、[更新器](../feature/2026-08-18-desktop-updater.md)和[封闭运行时](2026-08-17-desktop-closed-runtime-deploy-root.md)决策记录了建立功能对等后才会删除的回退实现。
+Electron 实现在 Windows Server 2025 CI 与真实 Windows 11 x64 电脑通过同一套安装、目录选择、启动和关闭验收前仍可使用。它的 [macOS](../feature/2026-08-16-macos-desktop-app.zh.md)、[Windows](../feature/2026-08-17-windows-desktop-app.zh.md)、[更新器](../feature/2026-08-18-desktop-updater.zh.md)和[封闭运行时](2026-08-17-desktop-closed-runtime-deploy-root.zh.md)决策记录了建立功能对等后才会删除的回退实现。
 
 ## Alternatives considered
 
@@ -36,6 +36,6 @@ Electron 实现在 Windows Server 2025 CI 与真实 Windows 11 x64 电脑通过�
 
 ## Consequences
 
-安装后的应用只含少量普通目标原生文件，不再携带 Node 依赖树或 Chromium 分发。实测 Apple Silicon App 包含 7 个文件和 238,775,693 字节；打包应用的清洁启动在 1.8 秒内完成页面加载，并且关闭时不需要强制终止。Windows 原生 CI 限制仍为 500 个文件、250 MB、安装 60 秒和首次页面加载 10 秒；真实 Windows 11 在开启 Defender 且未设排除项时的发布限制仍为安装 30 秒、冷启动 6 秒和热启动 3 秒。
+安装后的应用只含少量普通目标原生文件，不再携带 Node 依赖树或 Chromium 分发。实测 Apple Silicon App 包含 7 个文件和 238,907,293 字节；打包应用的清洁启动在 1.8 秒内完成页面加载，并且关闭时不需要强制终止。Windows 原生 CI 限制仍为 500 个文件、250 MB、安装 60 秒和首次页面加载 10 秒；真实 Windows 11 在开启 Defender 且未设排除项时的发布限制仍为安装 30 秒、冷启动 6 秒和热启动 3 秒。
 
-sidecar 构建依赖 pkg 的 VFS 行为和显式 packaged-module 清单。原生打包前，真实可行性探针会执行 node-pty、worker thread、Koffi、Web 启动、带打包 peer 的外部磁盘插件以及优雅关闭。安装包验收会审计目标架构、链接包含性、签名、数据隔离、单实例行为、目录选择、进程清理和更新篡改拒绝。Server 2025 结果不能替代真实 Windows 11 发布验收。
+sidecar 构建依赖 pkg 的 VFS 行为和显式 packaged-module 清单。原生打包前，真实可行性探针会执行 node-pty、worker thread、Koffi、Web 启动、带打包 peer 的外部磁盘插件以及优雅关闭。安装包验收会审计目标架构、链接包含性、签名、数据隔离、单实例行为、目录选择、进程清理和更新篡改拒绝。启动验收会解析服务端提供的 `__DSH_BOOT__` 图，拒绝空图，要求 client-modules 与 client-runtime 的 parser preload，并成功请求两个 bundle。随后它调用打包后的 `agentPreset.list`，创建路径包含中文与空格的工作区，再使用随附的 `standard` preset 创建会话。仅有 WebView load 事件并不足够，因为内核也可能渲染插件加载失败页面，或显示一个无法组装首个会话的外壳。Server 2025 结果不能替代真实 Windows 11 发布验收。

@@ -148,6 +148,7 @@ function composeProfile(
   name: string,
   patchFiles: readonly string[],
   moduleFallback: 'links' | 'resolver',
+  shippedPresetRoot: string,
 ): ComposedProfile {
   const profile = prepareProfile(name, true, moduleFallback)
   const homePatches = loadOptionalPatches(NAME, homePatchPath()) ?? []
@@ -167,7 +168,7 @@ function composeProfile(
       id: 'agent-presets',
       config: {
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-        roots: [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }],
+        roots: [{ path: shippedPresetRoot, trust: 'system' }],
       },
     })
   }
@@ -186,6 +187,8 @@ export interface RunProfileOptions {
   moduleFallback?: 'links' | 'resolver'
   /** Optional host-owned URL used to resolve bare packages in a closed runtime. */
   bareModuleBaseUrl?: string
+  /** Optional host-resolved built-in Agent preset directory for closed runtimes whose module URL is the executable entry. */
+  shippedPresetRoot?: string
   /** Optional host setup completed after Loader installation and before config entries mount. */
   prepareHost?: (ctx: Context) => Promise<void> | void
   /** `--patch` overlay paths, in argv order. */
@@ -217,7 +220,12 @@ function suppressShutdownError(ctx: Context, signal: AbortSignal, error: unknown
  * @returns the settled root context and the shutdown controller.
  */
 export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Context; shutdown: ProcessShutdown }> {
-  const composed = composeProfile(options.profile, options.patchFiles, options.moduleFallback ?? 'links')
+  const composed = composeProfile(
+    options.profile,
+    options.patchFiles,
+    options.moduleFallback ?? 'links',
+    options.shippedPresetRoot ?? SHIPPED_PRESET_ROOT,
+  )
   const app: { current?: Context } = {}
   const shutdown = createProcessShutdown(async () => { await app.current?.fiber.dispose() })
   const signalShutdown = new AbortController()

@@ -12,11 +12,13 @@ describe('desktop sidecar startup', () => {
       environment,
       '/app/desktop.patch.yml',
       'file:///snapshot/desktop/sidecar-bin.js',
+      '/snapshot/node_modules/@deepseek-ai/dsh/config/agent-presets',
     )).toEqual({
       environment,
       profile: 'web',
       moduleFallback: 'resolver',
       bareModuleBaseUrl: 'file:///snapshot/desktop/sidecar-bin.js',
+      shippedPresetRoot: '/snapshot/node_modules/@deepseek-ai/dsh/config/agent-presets',
       patchFiles: ['/app/desktop.patch.yml'],
       args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
     })
