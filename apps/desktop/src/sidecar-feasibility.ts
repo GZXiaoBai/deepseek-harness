@@ -11,6 +11,32 @@ export interface DesktopSidecarFeasibilityResult {
   externalPlugin: boolean
 }
 
+const WINDOWS_PTY_ENVIRONMENT_KEYS = [
+  'ComSpec',
+  'Path',
+  'PATHEXT',
+  'SystemDrive',
+  'SystemRoot',
+  'TEMP',
+  'TMP',
+  'USERPROFILE',
+  'WINDIR',
+] as const
+
+/** Returns the minimal inherited environment required by Windows CreateProcessW. */
+export function createPtyProbeEnvironment(
+  platform: NodeJS.Platform,
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  if (platform !== 'win32') return {}
+  const selected: NodeJS.ProcessEnv = {}
+  for (const key of WINDOWS_PTY_ENVIRONMENT_KEYS) {
+    const value = environment[key]
+    if (value !== undefined) selected[key] = value
+  }
+  return selected
+}
+
 /** Exercises native modules, VFS workers, and a disk plugin from inside the SEA. */
 export async function runDesktopSidecarFeasibilityProbe(
   externalPluginPath: string,
@@ -26,8 +52,9 @@ export async function runDesktopSidecarFeasibilityProbe(
 
 async function probeNodePty(): Promise<boolean> {
   const pty = await import('node-pty')
+  const environment = createPtyProbeEnvironment(process.platform, process.env)
   const executable = process.platform === 'win32'
-    ? process.env.ComSpec ?? 'cmd.exe'
+    ? environment.ComSpec ?? 'cmd.exe'
     : '/bin/sh'
   const args = process.platform === 'win32'
     ? ['/d', '/s', '/c', 'echo DSH_PTY_OK']
@@ -37,7 +64,7 @@ async function probeNodePty(): Promise<boolean> {
       cols: 80,
       rows: 24,
       cwd: process.cwd(),
-      env: {},
+      env: environment,
     })
     let output = ''
     terminal.onData((data) => { output += data })
