@@ -39,6 +39,9 @@ describe('Windows Desktop workflow', () => {
     })
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run test:desktop')
     expect(job?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run package:desktop:tauri')
+    const webview = job?.steps?.find(step => step.name === 'Install WebView2 Runtime for Server acceptance')
+    expect(webview?.run).toContain('https://go.microsoft.com/fwlink/p/?LinkId=2124703')
+    expect(webview?.run).toContain('/silent /install')
     const verifyPackage = job?.steps?.find(step => step.name === 'Verify unpacked App, installation, launch, and uninstall')
     expect(verifyPackage).toMatchObject({
       run: 'pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:windows',
@@ -68,6 +71,9 @@ describe('Windows Desktop workflow', () => {
     expect(String(windowsJob?.['runs-on'])).toContain('windows-2025')
     expect(String(macosJob?.['runs-on'])).toContain('macos-15')
     expect(windowsJob?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run package:desktop:tauri')
+    const webview = windowsJob?.steps?.find(step => step.name === 'Install WebView2 Runtime for Server acceptance')
+    expect(webview?.run).toContain('https://go.microsoft.com/fwlink/p/?LinkId=2124703')
+    expect(webview?.run).toContain('/silent /install')
     expect(macosJob?.steps?.map(step => step.run).filter(Boolean)).toContain('pnpm run package:desktop:tauri')
     expect(windowsJob?.steps?.some(step => step.name === 'Verify updater signature and tamper rejection')).toBe(true)
     expect(macosJob?.steps?.some(step => step.name === 'Verify updater signature and tamper rejection')).toBe(true)

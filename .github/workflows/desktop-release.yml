@@ -54,6 +54,14 @@ jobs:
         shell: pwsh
         run: pnpm run package:desktop:tauri
 
+      - name: Install WebView2 Runtime for Server acceptance
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+          Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $installer
+          $process = Start-Process -FilePath $installer -ArgumentList '/silent /install' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "WebView2 bootstrapper exited with $($process.ExitCode)" }
+
       - name: Verify unpacked App, installation, launch, and uninstall
         shell: pwsh
         env:
