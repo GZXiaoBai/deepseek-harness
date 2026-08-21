@@ -1,3 +1,5 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -18,6 +20,7 @@ const buildModule = await import(pathToFileURL(join(import.meta.dirname, '../scr
   createPackagedModuleList(manifest: { dependencies?: Record<string, string> }): string[]
   createSidecarVerifyCommand(repoRoot: string, nodePath: string): { executable: string; args: string[] }
   injectPackagedModuleRoster(source: string, packageNames: readonly string[]): string
+  stageDesktopSidecarAssets(repoRoot: string, stagingDirectory: string): Promise<void>
   shouldPruneStagedRuntimePath(relativePath: string, directory: boolean): boolean
   SIDECAR_ASSET_GLOBS: readonly string[]
   createNativeSidecarBuildPath(
@@ -85,6 +88,27 @@ describe('desktop SEA sidecar build', () => {
       'node_modules/**/*.so',
       'node_modules/**/*.so.*',
     ]))
+  })
+
+  it('copies Desktop-only overlays and worker inputs into the deployed package', async () => {
+    const stagingDirectory = await mkdtemp(join(tmpdir(), 'dsh-sidecar-assets-'))
+    try {
+      await buildModule.stageDesktopSidecarAssets(
+        resolve(import.meta.dirname, '../../..'),
+        stagingDirectory,
+      )
+
+      const sidecarDirectory = join(
+        stagingDirectory,
+        'node_modules/@deepseek-ai/dsh-desktop/sidecar',
+      )
+      expect(await readFile(join(sidecarDirectory, 'cordis.patch.yml'), 'utf8'))
+        .toContain('@deepseek-ai/dsh-desktop/sidecar-directory-picker')
+      expect(await readFile(join(sidecarDirectory, 'feasibility-worker.cjs'), 'utf8'))
+        .toContain('workerThread: true')
+    } finally {
+      await rm(stagingDirectory, { recursive: true, force: true })
+    }
   })
 
   it('probes a real disk plugin with packaged peers, a private dependency, and disposal', () => {

@@ -201,6 +201,7 @@ export async function buildDesktopSidecar() {
   )
   await restoreLegacyHoists(plan.stagingDirectory)
   await materializeStagedLinks(plan.stagingDirectory)
+  await stageDesktopSidecarAssets(REPOSITORY_ROOT, plan.stagingDirectory)
   await pruneNodePtyPrebuilds(plan.stagingDirectory, process.platform, process.arch)
   await pruneStagedRuntime(plan.stagingDirectory)
   await injectPkgConfig(plan.stagingDirectory)
@@ -220,6 +221,22 @@ export async function buildDesktopSidecar() {
   await copyNativeSidecars(plan.stagingDirectory, plan, process.platform, process.arch)
   console.log(`desktop sidecar: ${plan.outputPath}`)
   return plan
+}
+
+/**
+ * Copies Desktop-only runtime inputs that are intentionally absent from the npm package files.
+ * @param {string} repoRoot Repository checkout root.
+ * @param {string} stagingDirectory Deployed sidecar closure root.
+ * @returns {Promise<void>} Resolves after the assets are materialized.
+ */
+export async function stageDesktopSidecarAssets(repoRoot, stagingDirectory) {
+  const source = join(repoRoot, 'apps/desktop/sidecar')
+  const destination = join(
+    stagingDirectory,
+    'node_modules/@deepseek-ai/dsh-desktop/sidecar',
+  )
+  await mkdir(dirname(destination), { recursive: true })
+  await cp(source, destination, { recursive: true, force: true })
 }
 
 async function restoreLegacyHoists(stagingDirectory) {
