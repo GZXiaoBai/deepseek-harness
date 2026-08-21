@@ -97,6 +97,19 @@ export function createSidecarDeployArgs(stagingDirectory) {
   ]
 }
 
+/**
+ * Returns a shell-free pnpm invocation through the current Node executable.
+ *
+ * @param {NodeJS.ProcessEnv} environment Package-script environment.
+ * @param {string} nodePath Current Node executable.
+ * @returns {{ executable: string, argsPrefix: string[] }} Native executable and fixed arguments.
+ */
+export function createPnpmCommand(environment, nodePath) {
+  const pnpmScript = environment.npm_execpath?.trim()
+  if (!pnpmScript) throw new Error('Desktop packaging requires npm_execpath from the pnpm package script')
+  return { executable: nodePath, argsPrefix: [pnpmScript] }
+}
+
 /** Returns the sorted exact package names the VFS resolver must own. */
 export function createPackagedModuleList(manifest) {
   return Object.keys(manifest.dependencies ?? {})
@@ -178,16 +191,21 @@ export async function buildDesktopSidecar() {
     arch: process.arch,
   })
   const verify = createSidecarVerifyCommand(REPOSITORY_ROOT, process.execPath)
+  const pnpm = createPnpmCommand(process.env, process.execPath)
   await run('verify runtime closure', verify.executable, verify.args)
   await rm(plan.stagingDirectory, { recursive: true, force: true })
-  await run('deploy sidecar closure', 'pnpm', createSidecarDeployArgs(plan.stagingDirectory))
+  await run(
+    'deploy sidecar closure',
+    pnpm.executable,
+    [...pnpm.argsPrefix, ...createSidecarDeployArgs(plan.stagingDirectory)],
+  )
   await restoreLegacyHoists(plan.stagingDirectory)
   await materializeStagedLinks(plan.stagingDirectory)
   await pruneNodePtyPrebuilds(plan.stagingDirectory, process.platform, process.arch)
   await pruneStagedRuntime(plan.stagingDirectory)
   await injectPkgConfig(plan.stagingDirectory)
   await mkdir(dirname(plan.outputPath), { recursive: true })
-  await run('build Node 24 SEA', 'pnpm', [
+  await run('build Node 24 SEA', pnpm.executable, [...pnpm.argsPrefix,
     'dlx',
     PKG_SPEC,
     plan.stagingDirectory,

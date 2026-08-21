@@ -11,6 +11,10 @@ const buildModule = await import(pathToFileURL(join(import.meta.dirname, '../scr
     executableSuffix: string
   }
   createSidecarDeployArgs(stagingDirectory: string): string[]
+  createPnpmCommand(environment: NodeJS.ProcessEnv, nodePath: string): {
+    executable: string
+    argsPrefix: string[]
+  }
   createPackagedModuleList(manifest: { dependencies?: Record<string, string> }): string[]
   createSidecarVerifyCommand(repoRoot: string, nodePath: string): { executable: string; args: string[] }
   injectPackagedModuleRoster(source: string, packageNames: readonly string[]): string
@@ -30,6 +34,12 @@ const feasibilityModule = await import(
 }
 
 describe('desktop SEA sidecar build', () => {
+  it('runs pnpm through Node instead of a Windows command shim or shell', () => {
+    expect(buildModule.createPnpmCommand({ npm_execpath: 'C:/pnpm/bin/pnpm.cjs' }, 'C:/node.exe'))
+      .toEqual({ executable: 'C:/node.exe', argsPrefix: ['C:/pnpm/bin/pnpm.cjs'] })
+    expect(() => buildModule.createPnpmCommand({}, '/node')).toThrow('npm_execpath')
+  })
+
   it('runs the closure verifier without asking pnpm to reconcile the workspace install', () => {
     expect(buildModule.createSidecarVerifyCommand('/repo', '/node')).toEqual({
       executable: '/node',

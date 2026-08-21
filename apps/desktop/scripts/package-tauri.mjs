@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { cp, mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { buildDesktopSidecar } from './build-sidecar.mjs'
+import { buildDesktopSidecar, createPnpmCommand } from './build-sidecar.mjs'
 import { verifyDesktopSidecarFeasibility } from './verify-sidecar-feasibility.mjs'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -80,7 +80,12 @@ export async function packageTauriDesktop(plan, signingEnvironment = {}) {
   await verifyDesktopSidecarFeasibility({ repoRoot: REPOSITORY_ROOT })
   // pnpm's legacy production deploy marks the shared workspace installation as
   // production-only. Restore the frozen developer graph before invoking Tauri.
-  await run('pnpm', ['install', '--frozen-lockfile'], REPOSITORY_ROOT)
+  const pnpm = createPnpmCommand(process.env, process.execPath)
+  await run(
+    pnpm.executable,
+    [...pnpm.argsPrefix, 'install', '--frozen-lockfile'],
+    REPOSITORY_ROOT,
+  )
   await run(
     process.execPath,
     [join(plan.desktopRoot, 'node_modules/@tauri-apps/cli/tauri.js'), ...plan.buildArguments],
