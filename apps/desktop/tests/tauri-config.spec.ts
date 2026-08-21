@@ -59,6 +59,7 @@ describe('Tauri desktop configuration', () => {
           webviewInstallMode: { type: 'skip' },
           nsis: {
             installMode: 'currentUser',
+            installerHooks: 'windows/installer-hooks.nsh',
             installerIcon: '../build/icon.ico',
             languages: ['English', 'SimpChinese'],
           },
@@ -66,6 +67,13 @@ describe('Tauri desktop configuration', () => {
       },
     })
     expect(JSON.stringify(config)).not.toMatch(/certificate|thumbprint|timestampUrl|perMachine/i)
+
+    const hooks = await readFile(join(tauriRoot, 'windows/installer-hooks.nsh'), 'utf8')
+    expect(hooks).toMatch(/!macro NSIS_HOOK_PREINSTALL[\s\S]*StrCpy \$NoShortcutMode 1/)
+    expect(hooks).toMatch(
+      /!macro NSIS_HOOK_POSTINSTALL[\s\S]*Call CreateOrUpdateStartMenuShortcut[\s\S]*StrCpy \$NoShortcutMode 1/,
+    )
+    expect(hooks).not.toMatch(/CreateOrUpdateDesktopShortcut|CreateShortcut "\$DESKTOP/)
   })
 
   it('builds only an Apple Silicon macOS 14 App and DMG with ad-hoc hardened signing', async () => {
