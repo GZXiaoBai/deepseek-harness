@@ -43,6 +43,9 @@ describe('Tauri macOS package verification plan', () => {
       { id: '@deepseek-ai/dsh-client-modules', url: '/plugins/modules.js?rev=1' },
       { id: '@deepseek-ai/dsh-client-runtime', url: '/plugins/runtime.js?rev=2' },
       { id: '@deepseek-ai/dsh-typert-registry', url: '/plugins/typert.js?rev=3' },
+      { id: '@deepseek-ai/dsh-client-ui-settings-general', url: '/plugins/settings.js?rev=4' },
+      { id: '@deepseek-ai/dsh-client-ui-agent-preset', url: '/plugins/presets.js?rev=5' },
+      { id: '@deepseek-ai/dsh-client-ui-directory-picker-native', url: '/plugins/picker.js?rev=6' },
     ]
     const html = [
       '<html><head>',
@@ -56,9 +59,14 @@ describe('Tauri macOS package verification plan', () => {
       '/plugins/modules.js?rev=1',
       '/plugins/runtime.js?rev=2',
       '/plugins/typert.js?rev=3',
+      '/plugins/settings.js?rev=4',
+      '/plugins/presets.js?rev=5',
+      '/plugins/picker.js?rev=6',
     ])
     expect(() => validateHarnessBootHtml(html.replace(JSON.stringify(entries), '[]')))
       .toThrow('no client plugin entries')
+    expect(() => validateHarnessBootHtml(html.replace(JSON.stringify(entries), JSON.stringify(entries.slice(0, -1)))))
+      .toThrow('missing @deepseek-ai/dsh-client-ui-directory-picker-native')
     expect(() => validateHarnessBootHtml(html.replace('<script src="/plugins/modules.js?rev=1"></script>', '')))
       .toThrow('did not parser-preload @deepseek-ai/dsh-client-modules')
   })

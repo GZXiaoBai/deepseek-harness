@@ -46,4 +46,4 @@ pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:macos
 # Windows: pnpm --filter @deepseek-ai/dsh-desktop run verify:tauri:windows
 ```
 
-Windows Server 2025 工作流会验证当前用户静默安装与卸载、快捷方式位置、零 reparse point、x64 PE 负载、预期未签名状态、严格回环启动、所有声明的客户端 bundle、profile 初始化、原生目录选择请求、内置 Agent preset、单实例归属、关闭到托盘行为、关闭清理、数据保留、文件与体积限制以及 CI 时间限制。协议测试会保留包含中文和空格的路径，发布工作流还会证明原始更新包验签成功，而修改一个字节后的包验签失败。正式发布前，必须在开启 Defender 且未设置排除项的真实 Windows 11 x64 电脑上运行同一安装验收，并实际选择包含中文和空格的目录；Server 2025 不能替代 Windows 11 实机结果。
+Windows Server 2025 工作流会验证当前用户静默安装与卸载、快捷方式位置、零 reparse point、x64 PE 负载、预期未签名状态、严格回环启动、所有声明的客户端 bundle、必需的设置、Agent preset 与原生目录选择客户端模块、profile 初始化、原生目录选择请求、内置 Agent preset、单实例归属、关闭到托盘行为、关闭清理、数据保留、文件与体积限制以及 CI 时间限制。协议测试会保留包含中文和空格的路径，发布工作流还会证明原始更新包验签成功，而修改一个字节后的包验签失败。正式发布前，必须在开启 Defender 且未设置排除项的真实 Windows 11 x64 电脑上运行同一安装验收，并实际选择包含中文和空格的目录；Server 2025 不能替代 Windows 11 实机结果。

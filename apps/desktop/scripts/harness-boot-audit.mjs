@@ -3,6 +3,12 @@ const REQUIRED_BOOT_MODULES = [
   '@deepseek-ai/dsh-client-runtime',
 ]
 
+const REQUIRED_DESKTOP_CLIENT_MODULES = [
+  '@deepseek-ai/dsh-client-ui-settings-general',
+  '@deepseek-ai/dsh-client-ui-agent-preset',
+  '@deepseek-ai/dsh-client-ui-directory-picker-native',
+]
+
 /** Returns every client-bundle URL after validating the required parser preloads. */
 export function validateHarnessBootHtml(html) {
   const serialized = /globalThis\["__DSH_BOOT__"\] = (\{.*?\})<\/script>/.exec(html)?.[1]
@@ -17,6 +23,11 @@ export function validateHarnessBootHtml(html) {
     }
     return entry.url
   })
+  for (const id of REQUIRED_DESKTOP_CLIENT_MODULES) {
+    if (!graph.entries.some(entry => entry.id === id)) {
+      throw new Error(`Harness boot graph is missing ${id}`)
+    }
+  }
   for (const id of REQUIRED_BOOT_MODULES) {
     const entry = graph.entries.find(candidate => candidate?.id === id)
     if (typeof entry?.url !== 'string') throw new Error(`Harness boot graph is missing ${id}`)

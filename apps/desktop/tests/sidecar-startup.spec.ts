@@ -7,7 +7,7 @@ import {
 } from '../src/sidecar-startup.ts'
 
 describe('desktop sidecar startup', () => {
-  it('replaces the adaptive directory picker with the desktop sidecar provider', () => {
+  it('replaces the adaptive picker with the desktop provider and native client surface', () => {
     const webPatch = fileURLToPath(new URL(
       '../../../packages/bundle/web-app/cordis.patch.yml',
       import.meta.url,
@@ -27,6 +27,11 @@ describe('desktop sidecar startup', () => {
     expect(entries.filter(entry => entry.id === 'desktop-directory-picker')).toEqual([
       expect.objectContaining({
         name: '@deepseek-ai/dsh-desktop/sidecar-directory-picker',
+      }),
+    ])
+    expect(entries.filter(entry => entry.id === 'desktop-directory-picker-surface')).toEqual([
+      expect.objectContaining({
+        name: '@deepseek-ai/dsh-client-ui-directory-picker-native',
       }),
     ])
   })
