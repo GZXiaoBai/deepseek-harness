@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/event-producer-consumer.md
-event-producer-consumer.md: d17a4aaf31ccf8a99384e2122088891418866443
-event-producer-consumer.zh.md: 48128bebc1f1d7eed826134a6acc1aba4be61a80
+event-producer-consumer.md: f0eea8ef36fd26cdddab754fd59d58e4145b208d
+event-producer-consumer.zh.md: ad38d515ec2dbe0542906a3106880143bac0dacc
