@@ -14,7 +14,7 @@ describe('Tauri desktop configuration', () => {
 
     expect(config).toMatchObject({
       productName: 'DeepSeek Harness',
-      version: '0.1.1-rc.1',
+      version: '0.1.1-rc.2',
       identifier: 'ai.deepseek.harness',
       build: { frontendDist: '../static' },
       app: {
