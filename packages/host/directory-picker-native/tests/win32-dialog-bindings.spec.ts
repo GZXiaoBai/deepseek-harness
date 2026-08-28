@@ -40,8 +40,6 @@ interface ComWorld {
   registered: number
   unregistered: number
   uninitialized: number
-  rawViews: number
-  disposableStrings: number
 }
 
 function comWorld(overrides: Partial<ComWorld> = {}): ComWorld {
@@ -50,7 +48,7 @@ function comWorld(overrides: Partial<ComWorld> = {}): ComWorld {
     hasThreadDpi: true, supportedDpiContexts: [-4], enumThrows: false,
     path: 'C:\\选中\\directory',
     titles: [], options: [], dpiContexts: [], freed: [], released: [], posted: [],
-    registered: 0, unregistered: 0, uninitialized: 0, rawViews: 0, disposableStrings: 0,
+    registered: 0, unregistered: 0, uninitialized: 0,
     ...overrides,
   }
 }
@@ -63,7 +61,6 @@ function installFakeKoffi(world: ComWorld): void {
   const itemPtr: FakePtr = { kind: 'item' }
   const namePtr: FakePtr = { kind: 'name', text: world.path }
   const outBuffers = new Map<unknown, FakePtr>()
-  let disposeString: ((pointer: unknown) => void) | undefined
 
   const dispatch = (self: FakePtr, slot: number, args: unknown[]): number => {
     if (self.kind === 'dialog') {
@@ -128,16 +125,9 @@ function installFakeKoffi(world: ComWorld): void {
         },
       }),
       proto: (declaration: string) => ({ declaration }),
-      disposable: (_name: string, type: string, free: (pointer: unknown) => void) => {
-        if (type !== 'str16') throw new Error(`unexpected disposable type ${type}`)
-        world.disposableStrings += 1
-        disposeString = free
-        return { kind: 'disposable-str16' }
-      },
       pointer: (type: unknown) => type,
       sizeof: (type: string) => { void type; return FAKE_POINTER_SIZE },
       view: (value: unknown, len: number): ArrayBuffer => {
-        world.rawViews += 1
         const bytes = Buffer.alloc(len)
         bytes.write((value as FakePtr).text as string, 'utf16le')
         return bytes.buffer
@@ -156,16 +146,7 @@ function installFakeKoffi(world: ComWorld): void {
         if (outBuffers.has(value)) return outBuffers.get(value)
         return { owner: value as FakePtr }
       },
-      call: (fn: { call: (args: unknown[]) => number }, proto: { declaration: string }, _self: unknown, ...args: unknown[]) => {
-        const result = fn.call(args)
-        if (result >= 0 && proto.declaration.includes('DshCoTaskMemStr16')) {
-          const output = args[1] as unknown[]
-          const pointer = output[0] as FakePtr
-          output[0] = pointer.text
-          disposeString?.(pointer)
-        }
-        return result
-      },
+      call: (fn: { call: (args: unknown[]) => number }, _proto: unknown, _self: unknown, ...args: unknown[]) => fn.call(args),
     },
   }))
 }
@@ -199,15 +180,13 @@ describe('loadWin32DialogBindings over the fake COM world', () => {
     expect(world.uninitialized).toBe(1)
   })
 
-  it('converts the COM-owned UTF-16 result without exposing a raw memory view', async () => {
-    const world = comWorld()
+  it('reads a UTF-16 path whose BMP code unit has a zero low byte (U+5F00 开)', async () => {
+    // 开 = U+5F00 → UTF-16LE bytes 00 5F. A scan that treats any zero low
+    // byte as NUL truncates here and returns the nonexistent ...\安卓.
+    const world = comWorld({ path: 'C:\\fixture\\安卓开发' })
     installFakeKoffi(world)
     const bindings = await (await loadBindingsModule()).loadWin32DialogBindings()
-
-    expect(runFolderDialog(bindings, 'Pick', vi.fn())).toBe('C:\\选中\\directory')
-    expect(world.rawViews).toBe(0)
-    expect(world.disposableStrings).toBe(1)
-    expect(world.freed).toHaveLength(1)
+    expect(runFolderDialog(bindings, 'Pick', vi.fn())).toBe('C:\\fixture\\安卓开发')
   })
 
   it('maps dismissal and the S_FALSE CoInitializeEx', async () => {

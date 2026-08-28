@@ -17,16 +17,6 @@ import {
 import { isPackagedDesktopSidecar, PACKAGED_DESKTOP_MODULES } from './sidecar-packaged-modules.ts'
 import { buildDesktopSidecarProfileOptions, desktopSidecarReadyEvents } from './sidecar-startup.ts'
 
-interface DesktopClientPackageJsonResolver {
-  resolve(specifier: string): string | undefined
-}
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    clientPackageJsonResolver: DesktopClientPackageJsonResolver
-  }
-}
-
 const startedAt = Date.now()
 const packagedDependencies = isPackagedDesktopSidecar(
   PACKAGED_DESKTOP_MODULES.length,
@@ -44,9 +34,6 @@ const packagedPackageJson = createDesktopPackageJsonMappings(
   specifier => import.meta.resolve(specifier),
 )
 const shippedPresetRoot = resolveDesktopShippedPresetRoot(packagedPackageJson)
-const clientPackageJsonResolver: DesktopClientPackageJsonResolver = {
-  resolve: specifier => packagedPackageJson.get(specifier),
-}
 const moduleHooks = installDesktopModuleResolver(createDesktopModuleMappings(
   packagedDependencies,
   specifier => import.meta.resolve(specifier),
@@ -111,7 +98,6 @@ async function runDesktopSidecar(): Promise<void> {
         shippedPresetRoot,
       ),
       prepareHost: (ctx) => {
-        ctx.provide('clientPackageJsonResolver', clientPackageJsonResolver)
         const internal = ctx.loader.internal
         if (internal === undefined) throw new Error('desktop sidecar requires the Node internal module loader')
         ctx.loader.internal = createDesktopLoaderInternalProxy(internal, resolvePackagedSpecifier)

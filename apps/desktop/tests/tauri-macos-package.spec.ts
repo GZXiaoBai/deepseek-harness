@@ -38,10 +38,10 @@ describe('Tauri macOS package verification plan', () => {
     })
   })
 
-  it('requires both parser preloads in a non-empty Harness boot graph', () => {
+  it('requires the parser bootstrap in a non-empty Harness boot graph', () => {
     const entries = [
       { id: '@deepseek-ai/dsh-client-modules', url: '/plugins/modules.js?rev=1' },
-      { id: '@deepseek-ai/dsh-client-runtime', url: '/plugins/runtime.js?rev=2' },
+      { id: '@deepseek-ai/dsh-api-session-controller', url: '/plugins/session.js?rev=2' },
       { id: '@deepseek-ai/dsh-typert-registry', url: '/plugins/typert.js?rev=3' },
       { id: '@deepseek-ai/dsh-client-ui-settings-general', url: '/plugins/settings.js?rev=4' },
       { id: '@deepseek-ai/dsh-client-ui-agent-preset', url: '/plugins/presets.js?rev=5' },
@@ -50,14 +50,13 @@ describe('Tauri macOS package verification plan', () => {
     const html = [
       '<html><head>',
       '<script src="/plugins/modules.js?rev=1"></script>',
-      '<script src="/plugins/runtime.js?rev=2"></script>',
       `<script>globalThis["__DSH_BOOT__"] = ${JSON.stringify({ rev: 'graph', entries })}</script>`,
       '</head></html>',
     ].join('')
 
     expect(validateHarnessBootHtml(html)).toEqual([
       '/plugins/modules.js?rev=1',
-      '/plugins/runtime.js?rev=2',
+      '/plugins/session.js?rev=2',
       '/plugins/typert.js?rev=3',
       '/plugins/settings.js?rev=4',
       '/plugins/presets.js?rev=5',

@@ -39,7 +39,7 @@ describe('desktop sidecar module resolver', () => {
       if (specifier === '@deepseek-ai/cordis/package.json') {
         return pathToFileURL(join(snapshotRoot, 'node_modules', '@deepseek-ai/cordis', 'package.json')).href
       }
-      if (specifier === '@deepseek-ai/dsh-client-runtime/package.json') {
+      if (specifier === '@deepseek-ai/dsh-client-store/package.json') {
         throw new Error('dynamic package manifest is absent from the SEA resolver table')
       }
       return pathToFileURL(join(snapshotRoot, 'node_modules', specifier, 'lib/index.js')).href
@@ -47,10 +47,10 @@ describe('desktop sidecar module resolver', () => {
 
     expect([...createDesktopPackageJsonMappings([
       '@deepseek-ai/cordis',
-      '@deepseek-ai/dsh-client-runtime',
+      '@deepseek-ai/dsh-client-store',
     ], resolveModule)]).toEqual([
       ['@deepseek-ai/cordis', join(snapshotRoot, 'node_modules', '@deepseek-ai/cordis', 'package.json')],
-      ['@deepseek-ai/dsh-client-runtime', join(snapshotRoot, 'node_modules', '@deepseek-ai/dsh-client-runtime', 'package.json')],
+      ['@deepseek-ai/dsh-client-store', join(snapshotRoot, 'node_modules', '@deepseek-ai/dsh-client-store', 'package.json')],
     ])
   })
 

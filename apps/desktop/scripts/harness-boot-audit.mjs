@@ -1,6 +1,5 @@
 const REQUIRED_BOOT_MODULES = [
   '@deepseek-ai/dsh-client-modules',
-  '@deepseek-ai/dsh-client-runtime',
 ]
 
 const REQUIRED_DESKTOP_CLIENT_MODULES = [
