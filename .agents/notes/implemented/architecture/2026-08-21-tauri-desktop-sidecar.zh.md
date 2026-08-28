@@ -10,9 +10,9 @@ Electron 桌面包在 Windows 上安装超过 32,000 个文件，总体积约 61
 
 ## Decision
 
-Tauri 2 负责原生窗口、菜单、导航策略、单实例聚焦、窗口状态、更新、目录对话框和后端进程监管。现有 Web UI 保持不变，不获得 Tauri shell、文件系统或通用 invoke 权限。窗口先显示内置的无脚本启动页，只在后端报告精确的 `http://127.0.0.1:<port>/` 来源后导航；非预期导航和所有弹窗都会被拒绝，非回环 HTTP(S) 链接则交给系统浏览器。
+Tauri 2 负责原生窗口、菜单、导航策略、单实例聚焦、窗口状态、更新、目录对话框和后端进程监管。现有 Web UI 保持不变，不获得 Tauri shell、文件系统或通用 invoke 权限。窗口先显示内置的无脚本启动页，只在后端报告 `http://127.0.0.1:<port>/` 或带认证的 `http://127.0.0.1:<port>/?token=<URL-safe-token>` 格式后导航；空 token、重复参数和附加查询参数都会被拒绝。非预期导航和所有弹窗都会被拒绝，非回环 HTTP(S) 链接则交给系统浏览器。
 
-`@yao-pkg/pkg --sea` 把 Node 24 Web 后端、内置插件、配置和 Web 静态资源打进一个目标平台专用的可执行文件。目标原生的 `node-pty`、ripgrep 与 macOS spawn helper 仍是相邻的普通二进制文件。sidecar 排除开发源码、source map、测试和文档。桌面专用 overlay 与 worker 输入不列入 npm 包文件清单，而是在 pkg 捕获 VFS 前显式复制到部署闭包。启动时的模块解析 hook 把打包后的 Cordis 与 Harness Service Definition peer 映射到 VFS 单例，同时允许 profile 插件及其私有依赖从磁盘解析；打包 profile 不会创建指向 VFS 的链接。同一个宿主适配器依据预计算的 VFS 包根目录，为客户端模块扫描解析每个内置包的 manifest；不在打包清单中的名称仍使用以 profile 为锚点的解析器。桌面启动器从打包的 `@deepseek-ai/dsh` manifest 推导随附 Agent preset 根目录，而不依赖导入模块的 `import.meta.url`；pkg 会把后者报告为 SEA 入口 URL。preset 发现过程先枚举子项名称，再分别执行 stat，因为 pkg VFS 不提供完整的 Node `Dirent` 方法。
+`@yao-pkg/pkg --sea` 把 Node 24 Web 后端、内置插件、配置和 Web 静态资源打进一个目标平台专用的可执行文件。目标原生的 `node-pty`、ripgrep 与 macOS spawn helper 仍是相邻的普通二进制文件。sidecar 排除开发源码、source map、测试和文档。桌面专用 overlay 与 worker 输入不列入 npm 包文件清单，而是在 pkg 捕获 VFS 前显式复制到部署闭包。启动时的模块解析 hook 把打包后的 Cordis 与 Harness Service Definition peer 映射到 VFS 单例，同时允许 profile 插件及其私有依赖从磁盘解析；打包 profile 不会创建指向 VFS 的链接。客户端模块发现过程通过每个活动 Loader 配置项所属的树解析包 metadata，其中也包括嵌入式 VFS hook。桌面启动器从打包的 `@deepseek-ai/dsh` manifest 推导随附 Agent preset 根目录，而不依赖导入模块的 `import.meta.url`；pkg 会把后者报告为 SEA 入口 URL。preset 发现过程先枚举子项名称，再分别执行 stat，因为 pkg VFS 不提供完整的 Node `Dirent` 方法。
 
 版本化行协议在 stdout 使用 `DSH_DESKTOP/1 ` 前缀。JSON 事件报告启动阶段、就绪、致命错误、停止和原生目录对话框请求；stdin 传递 shutdown 与对话框结果。没有前缀的输出只作为插件日志，不能被识别为控制消息。桌面 profile 使用 Tauri provider 替换 adaptive host picker，并显式保留负责渲染工作区操作、调用该 provider 的原生目录选择客户端模块。因此两个目标的目录选择都使用 Tauri 对话框，不再执行曾导致文件夹选择进程退出的 Koffi Win32 dialog worker。
 

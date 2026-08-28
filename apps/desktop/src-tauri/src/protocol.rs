@@ -80,11 +80,20 @@ pub fn is_strict_loopback_url(value: &str) -> bool {
     let Ok(url) = Url::parse(value) else {
         return false;
     };
+    let query_is_valid = match url.query() {
+        None => true,
+        Some(query) => query.strip_prefix("token=").is_some_and(|token| {
+            !token.is_empty()
+                && token
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+        }),
+    };
     url.scheme() == "http"
         && url.host_str() == Some("127.0.0.1")
         && url.port().is_some()
         && url.path() == "/"
-        && url.query().is_none()
+        && query_is_valid
         && url.fragment().is_none()
         && url.username().is_empty()
         && url.password().is_none()
@@ -104,6 +113,15 @@ mod tests {
                 url: "http://127.0.0.1:43127/".into()
             }),
         );
+        assert_eq!(
+            parse_event(
+                r#"DSH_DESKTOP/1 {"type":"ready","url":"http://127.0.0.1:43127/?token=abc_123-XYZ"}"#,
+            )
+            .unwrap(),
+            Some(SidecarEvent::Ready {
+                url: "http://127.0.0.1:43127/?token=abc_123-XYZ".into()
+            }),
+        );
     }
 
     #[test]
@@ -113,6 +131,9 @@ mod tests {
             "http://localhost:43127/",
             "http://127.0.0.1:43127/path",
             "http://127.0.0.1:43127/?query=1",
+            "http://127.0.0.1:43127/?token=",
+            "http://127.0.0.1:43127/?token=one&token=two",
+            "http://127.0.0.1:43127/?token=one&next=two",
             "http://127.0.0.1/",
         ] {
             let line = format!(r#"{PREFIX}{{"type":"ready","url":"{url}"}}"#);

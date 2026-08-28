@@ -182,7 +182,7 @@ function requirePhase(value: unknown): DesktopSidecarPhase {
 }
 
 function isStrictLoopbackUrl(value: string): boolean {
-  const match = /^http:\/\/127\.0\.0\.1:([0-9]+)\/$/.exec(value)
+  const match = /^http:\/\/127\.0\.0\.1:([0-9]+)\/(?:\?token=([A-Za-z0-9_-]+))?$/.exec(value)
   if (match === null) return false
   const port = Number(match[1])
   return Number.isInteger(port) && port >= 1 && port <= 65_535

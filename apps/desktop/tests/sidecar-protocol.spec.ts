@@ -19,12 +19,21 @@ describe('desktop sidecar protocol', () => {
     )).toEqual({ type: 'ready', url: 'http://127.0.0.1:43127/' })
   })
 
+  it('accepts one URL-safe Web authentication token on the ready URL', () => {
+    expect(parseDesktopSidecarEvent(
+      'DSH_DESKTOP/1 {"type":"ready","url":"http://127.0.0.1:43127/?token=abc_123-XYZ"}',
+    )).toEqual({ type: 'ready', url: 'http://127.0.0.1:43127/?token=abc_123-XYZ' })
+  })
+
   it.each([
     ['localhost', 'http://localhost:43127/'],
     ['IPv6', 'http://[::1]:43127/'],
     ['credentials', 'http://user:pass@127.0.0.1:43127/'],
     ['path', 'http://127.0.0.1:43127/app'],
     ['query', 'http://127.0.0.1:43127/?source=desktop'],
+    ['empty token', 'http://127.0.0.1:43127/?token='],
+    ['duplicate token', 'http://127.0.0.1:43127/?token=one&token=two'],
+    ['extra query', 'http://127.0.0.1:43127/?token=one&next=two'],
     ['fragment', 'http://127.0.0.1:43127/#app'],
     ['port zero', 'http://127.0.0.1:0/'],
   ])('rejects a ready event with a non-canonical %s URL', (_case, url) => {
