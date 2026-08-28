@@ -76,10 +76,15 @@ describe('Tauri Windows package verification', () => {
     const log = [
       '1\tdesktop\tsidecar spawned pid=1234',
       '2\tsidecar-stdout\tplugin noise',
-      '3\tsidecar-stdout\tDSH_DESKTOP/1 {"type":"ready","url":"http://127.0.0.1:43210/"}',
+      '3\tsidecar-stdout\tDSH_DESKTOP/1 {"type":"ready","url":"http://127.0.0.1:43210/?token=abc_123-XYZ"}',
     ].join('\n')
-    expect(parseTauriDesktopLifecycle(log)).toEqual({ pid: 1234, startCount: 1, url: new URL('http://127.0.0.1:43210/') })
+    expect(parseTauriDesktopLifecycle(log)).toEqual({
+      pid: 1234,
+      startCount: 1,
+      url: new URL('http://127.0.0.1:43210/?token=abc_123-XYZ'),
+    })
     expect(() => parseTauriDesktopLifecycle(log.replace('127.0.0.1', 'localhost'))).toThrow(/strict loopback/)
+    expect(() => parseTauriDesktopLifecycle(log.replace('abc_123-XYZ', 'one&next=two'))).toThrow(/strict loopback/)
   })
 
   it('finds only versioned desktop directory-picker requests', () => {

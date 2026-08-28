@@ -9,7 +9,7 @@
  * suite: the derived writable root is resolved in the constructor.
  */
 
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -93,6 +93,30 @@ describe('the shipped preset root', () => {
     expect(ctx.agentPresets.roots).toEqual([{ path: SYSTEM_ROOT, trust: 'system' }])
     const minimal = (await ctx.agentPresets.list()).find(preset => preset.id === 'minimal')
     expect(minimal?.path.startsWith(SYSTEM_ROOT)).toBe(true)
+  })
+
+  it('checks package health from an explicit embedded-harness base', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-embedded-preset-'))
+    const presetRoot = join(root, 'presets')
+    const harnessRoot = join(root, 'snapshot')
+    await mkdir(join(presetRoot, 'embedded'), { recursive: true })
+    await writeFile(
+      join(presetRoot, 'embedded', 'agent.cordis.yml'),
+      '- id: persona\n  name: \'@deepseek-ai/dsh-persona\'\n',
+    )
+    await mkdir(join(harnessRoot, 'node_modules/@deepseek-ai/dsh-persona'), { recursive: true })
+    await writeFile(join(harnessRoot, 'node_modules/@deepseek-ai/dsh-persona/package.json'), '{}\n')
+
+    const ctx = await roster({
+      includeShippedRoot: false,
+      includeUserRoot: false,
+      roots: [{ path: presetRoot, trust: 'system' }],
+      harnessBase: pathToFileURL(join(harnessRoot, 'sidecar.js')).href,
+    } as unknown as Partial<Config>)
+
+    const [embedded] = await ctx.agentPresets.list()
+    expect(embedded).toMatchObject({ id: 'embedded' })
+    expect(embedded?.broken).toBeUndefined()
   })
 
   it('enables web_fetch in each tool-bearing Web app preset', async () => {

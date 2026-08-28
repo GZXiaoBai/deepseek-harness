@@ -1,6 +1,6 @@
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 const {
   createTauriMacosVerifyPlan,
@@ -26,6 +26,10 @@ const {
   ) => Promise<void>
 }
 
+const { requireHarnessBoot } = await import(
+  pathToFileURL(join(import.meta.dirname, '../scripts/harness-boot-audit.mjs')).href,
+) as { requireHarnessBoot: (url: string, timeoutMs: number) => Promise<unknown> }
+
 describe('Tauri macOS package verification plan', () => {
   const desktopRoot = resolve(import.meta.dirname, '..')
 
@@ -49,7 +53,7 @@ describe('Tauri macOS package verification plan', () => {
     ]
     const html = [
       '<html><head>',
-      '<script src="/plugins/modules.js?rev=1"></script>',
+      '<script src="/plugins/??@deepseek-ai/dsh-client-modules/client.js&amp;rev=bootstrap"></script>',
       `<script>globalThis["__DSH_BOOT__"] = ${JSON.stringify({ rev: 'graph', entries })}</script>`,
       '</head></html>',
     ].join('')
@@ -66,7 +70,10 @@ describe('Tauri macOS package verification plan', () => {
       .toThrow('no client plugin entries')
     expect(() => validateHarnessBootHtml(html.replace(JSON.stringify(entries), JSON.stringify(entries.slice(0, -1)))))
       .toThrow('missing @deepseek-ai/dsh-client-ui-directory-picker-native')
-    expect(() => validateHarnessBootHtml(html.replace('<script src="/plugins/modules.js?rev=1"></script>', '')))
+    expect(() => validateHarnessBootHtml(html.replace(
+      '<script src="/plugins/??@deepseek-ai/dsh-client-modules/client.js&amp;rev=bootstrap"></script>',
+      '',
+    )))
       .toThrow('did not parser-preload @deepseek-ai/dsh-client-modules')
   })
 
@@ -88,6 +95,47 @@ describe('Tauri macOS package verification plan', () => {
         result: { ok: true, value: { presets: [] } },
       })
     }).toThrow('standard Agent preset')
+  })
+
+  it('exchanges the alpha launch token and authenticates every boot request with its cookie', async () => {
+    const launchUrl = 'http://127.0.0.1:43127/?token=abc_123-XYZ'
+    const entries = [
+      { id: '@deepseek-ai/dsh-client-modules', url: '/plugins/modules.js?rev=1' },
+      { id: '@deepseek-ai/dsh-client-ui-settings-general', url: '/plugins/settings.js?rev=2' },
+      { id: '@deepseek-ai/dsh-client-ui-agent-preset', url: '/plugins/presets.js?rev=3' },
+      { id: '@deepseek-ai/dsh-client-ui-directory-picker-native', url: '/plugins/picker.js?rev=4' },
+    ]
+    const html = [
+      '<html><head>',
+      '<script src="/plugins/??@deepseek-ai/dsh-client-modules/client.js&amp;rev=bootstrap"></script>',
+      `<script>globalThis["__DSH_BOOT__"] = ${JSON.stringify({ rev: 'graph', entries })}</script>`,
+      '</head></html>',
+    ].join('')
+    const requests: Array<{ url: string; cookie: string | null; redirect?: RequestRedirect }> = []
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const headers = new Headers(init?.headers)
+      requests.push({
+        url,
+        cookie: headers.get('cookie'),
+        ...(init?.redirect === undefined ? {} : { redirect: init.redirect }),
+      })
+      if (requests.length === 1) {
+        return new Response(null, {
+          status: 303,
+          headers: { location: '/', 'set-cookie': 'dsh_session=signed; Path=/; HttpOnly; SameSite=Strict' },
+        })
+      }
+      if (url === 'http://127.0.0.1:43127/') return new Response(html, { status: 200 })
+      return new Response('bundle', { status: 200 })
+    })
+    try {
+      await requireHarnessBoot(launchUrl, 5_000)
+    } finally {
+      fetchMock.mockRestore()
+    }
+    expect(requests[0]).toEqual({ url: launchUrl, cookie: null, redirect: 'manual' })
+    expect(requests.slice(1).every(request => request.cookie === 'dsh_session=signed')).toBe(true)
   })
 
   it('verifies the packaged workspace-to-standard-session flow over the real RPC envelopes', async () => {
@@ -125,30 +173,30 @@ describe('Tauri macOS package verification plan', () => {
     )
     expect(seen).toEqual([
       {
-        url: 'http://127.0.0.1:43127/api/agentPreset.list',
+        url: 'http://127.0.0.1:43127/api/agentPresets/list',
         body: {
           type: 'client-request',
-          rpcId: 'desktop-verify-agentPreset.list',
-          method: 'agentPreset.list',
-          payload: {},
+          rpcId: 'desktop-verify-agentPresets/list',
+          method: 'agentPresets/list',
+          payload: { args: {} },
         },
       },
       {
-        url: 'http://127.0.0.1:43127/api/workspace.create',
+        url: 'http://127.0.0.1:43127/api/workspace/create',
         body: {
           type: 'client-request',
-          rpcId: 'desktop-verify-workspace.create',
-          method: 'workspace.create',
-          payload: { path: '/tmp/验证 工作区' },
+          rpcId: 'desktop-verify-workspace/create',
+          method: 'workspace/create',
+          payload: { args: { path: '/tmp/验证 工作区' } },
         },
       },
       {
-        url: 'http://127.0.0.1:43127/api/session.create',
+        url: 'http://127.0.0.1:43127/api/session/create',
         body: {
           type: 'client-request',
-          rpcId: 'desktop-verify-session.create',
-          method: 'session.create',
-          payload: { workspaceId: 'workspace-1', agentPreset: 'standard' },
+          rpcId: 'desktop-verify-session/create',
+          method: 'session/create',
+          payload: { args: { workspaceId: 'workspace-1', agentPreset: 'standard' } },
         },
       },
     ])

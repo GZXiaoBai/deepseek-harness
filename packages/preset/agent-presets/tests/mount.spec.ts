@@ -412,7 +412,7 @@ describe('a roster with no base to resolve from', () => {
 
     await expect(baseless.plugin(AgentPresets, {
       default: 'standard', roots: ROOTS, includeShippedRoot: false, includeUserRoot: false,
-    })).rejects.toThrow(/needs `ctx\.baseUrl`/)
+    })).rejects.toThrow(/needs `config\.harnessBase` or `ctx\.baseUrl`/)
   })
 })
 

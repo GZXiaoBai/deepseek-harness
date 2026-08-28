@@ -158,6 +158,7 @@ export class AgentPresets extends TypertRemoteService {
   /** Runtime schema for the preset roster. */
   static Config = z.object({
     default: z.string().required(),
+    harnessBase: z.string(),
     roots: z.array(z.object({
       path: z.string().required(),
       trust: z.union(['system', 'user'] as const).default('user'),
@@ -218,15 +219,15 @@ export class AgentPresets extends TypertRemoteService {
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'agentPresets')
     this.selfCtx = ctx
-    const { baseUrl } = ctx
+    const baseUrl = config.harnessBase ?? ctx.baseUrl
     if (baseUrl === undefined) {
       // Self-contained misconfiguration, so it fails at load: without a base
       // the roster can neither resolve a row nor tell a healthy preset from
       // one naming a package that is gone, and the silent alternative is the
       // exact failure this check exists to report.
       throw new Error(
-        'agent-presets: the roster needs `ctx.baseUrl` to resolve the plugins a composition names; '
-        + 'compose it under a Loader, or set the base on the context this plugin is applied to',
+        'agent-presets: the roster needs `config.harnessBase` or `ctx.baseUrl` to resolve the plugins a composition names; '
+        + 'compose it under a Loader, or configure an embedded harness base',
       )
     }
     this.harnessBase = baseUrl

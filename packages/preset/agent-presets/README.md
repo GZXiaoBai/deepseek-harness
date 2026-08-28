@@ -49,11 +49,14 @@ The plugin needs a `default` preset id and scans `roots` for presets:
 | Field | Default | Meaning |
 |---|---|---|
 | `default` | required | Preset id composed when a session names none |
+| `harnessBase` | Loader context base | Advanced embedder file URL whose ancestor `node_modules` supplies packages named by preset rows |
 | `roots` | `[]` | Scanned directories in precedence order; each supplies `path` (a leading `~` expands) and `trust` (defaults to `user`) |
 | `includeShippedRoot` | `true` | Prepend the package's bundled presets as a `system` root before every configured root |
 | `includeUserRoot` | `true` | Append `<dshHome>/.agent-presets` as a `user` root, after every configured root |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-presets) is the exhaustive source for every accepted field and its JSDoc.
+
+Ordinary deployments omit `harnessBase`. A single-executable embedder whose packages exist only in a virtual filesystem sets it to an entry file inside that installed package tree, so roster health checks and preset mounts resolve bare plugin names from the same harness.
 
 The shipped root is prepended before every configured root, so the built-in set remains available and wins duplicate ids even when a patch replaces the roster configuration. `includeShippedRoot: false` drops that built-in set for deployments that supply all presets themselves. `includeUserRoot: false` drops the derived writable root; tests that pin an exact roster disable both derived roots.
 

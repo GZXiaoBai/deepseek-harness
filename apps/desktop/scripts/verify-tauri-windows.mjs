@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, resolve, win32 } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
+import { parseDesktopReadyUrl, requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
 
 const PRODUCT_NAME = 'DeepSeek Harness'
@@ -68,14 +68,8 @@ export function parseTauriDesktopLifecycle(text) {
   const starts = [...text.matchAll(/\tdesktop\tsidecar spawned pid=(\d+)(?:\r?$)/gm)]
   const pid = Number(starts.at(-1)?.[1])
   if (!Number.isInteger(pid) || pid < 1) throw new Error('Tauri desktop log is missing a sidecar pid')
-  const frames = parseTauriSidecarFrames(text)
-  const ready = frames.findLast(frame => frame?.type === 'ready')
-  if (typeof ready?.url !== 'string' || !/^http:\/\/127\.0\.0\.1:[0-9]+\/$/.test(ready.url)) {
-    throw new Error('Tauri desktop log is missing a strict loopback ready URL')
-  }
-  const url = new URL(ready.url)
-  const port = Number(url.port)
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+  const url = parseDesktopReadyUrl(text)
+  if (url === undefined) {
     throw new Error('Tauri desktop log is missing a strict loopback ready URL')
   }
   return { pid, startCount: starts.length, url }
@@ -321,10 +315,10 @@ async function waitFor(operation, label) {
 }
 
 async function requirePage(url, userData) {
-  await requireHarnessBoot(url, STARTUP_TIMEOUT_MS)
+  const session = await requireHarnessBoot(url, STARTUP_TIMEOUT_MS)
   const workspacePath = join(userData, '验证 工作区')
   await mkdir(workspacePath, { recursive: true })
-  await requireHarnessFunctionality(url, workspacePath, STARTUP_TIMEOUT_MS)
+  await requireHarnessFunctionality(session.url, workspacePath, STARTUP_TIMEOUT_MS, session.fetch)
 }
 
 async function requireNativeDirectoryPicker(url, userData, desktopPid) {

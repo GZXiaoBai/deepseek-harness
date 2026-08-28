@@ -153,6 +153,7 @@ function allPatches(composed: ComposedProfile): PatchOptions[] {
  * @param patchFiles - `--patch` overlay paths, in argv order.
  * @param moduleFallback - `resolver` skips filesystem links because the embedded host owns package resolution.
  * @param shippedPresetRoot - Built-in Agent preset directory supplied by the host.
+ * @param bareModuleBaseUrl - Installed-host file URL used by an embedded resolver.
  * @returns the profile and its patch layers.
  */
 async function composeProfile(
@@ -160,6 +161,7 @@ async function composeProfile(
   patchFiles: readonly string[],
   moduleFallback: 'links' | 'resolver',
   shippedPresetRoot: string,
+  bareModuleBaseUrl?: string,
 ): Promise<ComposedProfile> {
   const profile = prepareProfile(name)
   if (moduleFallback === 'links') {
@@ -179,6 +181,7 @@ async function composeProfile(
       config: {
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
         roots: [{ path: shippedPresetRoot, trust: 'system' }],
+        ...(bareModuleBaseUrl === undefined ? {} : { harnessBase: bareModuleBaseUrl }),
       },
     })
   }
@@ -235,6 +238,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     options.patchFiles,
     options.moduleFallback ?? 'links',
     options.shippedPresetRoot ?? fileURLToPath(new URL('../config/agent-presets', import.meta.url)),
+    options.bareModuleBaseUrl,
   )
   const app: { current?: Context } = {}
   const appReady = createAppReady()

@@ -54,6 +54,8 @@ export interface PresetRoot {
 export interface Config {
   /** Preset id mounted when a caller names none. Missing at mount time fails loud. */
   default: string
+  /** File URL whose ancestor `node_modules` supplies packages named by preset rows. Defaults to the Loader context base. */
+  harnessBase?: string
   /** Scanned roots in precedence order; an earlier root wins a duplicate id. */
   roots: PresetRoot[]
   /**

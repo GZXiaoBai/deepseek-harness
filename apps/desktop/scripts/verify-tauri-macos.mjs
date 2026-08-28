@@ -3,7 +3,7 @@ import { access, lstat, mkdir, mkdtemp, opendir, readFile, readdir, rm, stat, wr
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
+import { parseDesktopReadyUrl, requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
 
 export {
   requireHarnessFunctionality,
@@ -128,8 +128,7 @@ async function verifyHarnessBoot(userData) {
   while (Date.now() < deadline) {
     try {
       const log = await readFile(logPath, 'utf8')
-      const matches = [...log.matchAll(/"type":"ready","url":"(http:\/\/127\.0\.0\.1:\d+\/)"/g)]
-      readyUrl = matches.at(-1)?.[1]
+      readyUrl = parseDesktopReadyUrl(log)?.href
       if (readyUrl !== undefined) break
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
@@ -137,10 +136,10 @@ async function verifyHarnessBoot(userData) {
     await new Promise(resolveWait => setTimeout(resolveWait, 25))
   }
   if (readyUrl === undefined) throw new Error('Packaged App did not report a strict ready URL')
-  await requireHarnessBoot(readyUrl, STARTUP_TIMEOUT_MS)
+  const session = await requireHarnessBoot(readyUrl, STARTUP_TIMEOUT_MS)
   const workspacePath = join(userData, '验证 工作区')
   await mkdir(workspacePath, { recursive: true })
-  await requireHarnessFunctionality(readyUrl, workspacePath, STARTUP_TIMEOUT_MS)
+  await requireHarnessFunctionality(session.url, workspacePath, STARTUP_TIMEOUT_MS, session.fetch)
 }
 
 async function* walk(directory) {
