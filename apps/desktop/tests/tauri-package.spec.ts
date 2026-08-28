@@ -45,6 +45,7 @@ describe('Tauri package plan', () => {
       rustTarget: 'aarch64-apple-darwin',
       releaseDirectory: join(repoRoot, 'apps/desktop/release-tauri'),
       dmgName: 'DeepSeek Harness-0.1.2-alpha.1-arm64.dmg',
+      sourceBuildArguments: ['--filter', '@deepseek-ai/dsh-desktop', 'run', 'build'],
       buildArguments: [
         'build',
         '--config',

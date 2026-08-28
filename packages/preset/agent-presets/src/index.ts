@@ -159,6 +159,7 @@ export class AgentPresets extends TypertRemoteService {
   static Config = z.object({
     default: z.string().required(),
     harnessBase: z.string(),
+    resolvedPackages: z.array(z.string()).default([]),
     roots: z.array(z.object({
       path: z.string().required(),
       trust: z.union(['system', 'user'] as const).default('user'),
@@ -192,6 +193,9 @@ export class AgentPresets extends TypertRemoteService {
    * base here is what lets health answer the question before a session does.
    */
   private readonly harnessBase: string
+
+  /** Bare packages the embedding host's module resolver supplies without disk entries. */
+  private readonly resolvedPackages: ReadonlySet<string>
 
   /**
    * The user layer over `config.default`, present only while a settings
@@ -231,6 +235,7 @@ export class AgentPresets extends TypertRemoteService {
       )
     }
     this.harnessBase = baseUrl
+    this.resolvedPackages = new Set(config.resolvedPackages ?? [])
     this.resolvedRoots = [
       ...config.includeShippedRoot ? [{ path: SHIPPED_PRESET_ROOT, trust: 'system' } satisfies PresetRoot] : [],
       ...config.roots,
@@ -304,7 +309,7 @@ export class AgentPresets extends TypertRemoteService {
    * @returns the presets, first-root-wins per id.
    */
   async list(): Promise<AgentPreset[]> {
-    return await discoverPresets(this.resolvedRoots, this.harnessBase)
+    return await discoverPresets(this.resolvedRoots, this.harnessBase, this.resolvedPackages)
   }
 
   /**

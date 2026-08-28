@@ -154,6 +154,7 @@ function allPatches(composed: ComposedProfile): PatchOptions[] {
  * @param moduleFallback - `resolver` skips filesystem links because the embedded host owns package resolution.
  * @param shippedPresetRoot - Built-in Agent preset directory supplied by the host.
  * @param bareModuleBaseUrl - Installed-host file URL used by an embedded resolver.
+ * @param bareModulePackages - Package roots supplied by an embedded resolver.
  * @returns the profile and its patch layers.
  */
 async function composeProfile(
@@ -162,6 +163,7 @@ async function composeProfile(
   moduleFallback: 'links' | 'resolver',
   shippedPresetRoot: string,
   bareModuleBaseUrl?: string,
+  bareModulePackages: readonly string[] = [],
 ): Promise<ComposedProfile> {
   const profile = prepareProfile(name)
   if (moduleFallback === 'links') {
@@ -182,6 +184,7 @@ async function composeProfile(
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
         roots: [{ path: shippedPresetRoot, trust: 'system' }],
         ...(bareModuleBaseUrl === undefined ? {} : { harnessBase: bareModuleBaseUrl }),
+        ...(bareModulePackages.length === 0 ? {} : { resolvedPackages: [...bareModulePackages] }),
       },
     })
   }
@@ -200,6 +203,8 @@ export interface RunProfileOptions {
   moduleFallback?: 'links' | 'resolver'
   /** Optional host-owned URL used to resolve bare packages in a closed runtime. */
   bareModuleBaseUrl?: string
+  /** Bare packages provided by the closed runtime's host resolver. */
+  bareModulePackages?: readonly string[]
   /** Host-resolved built-in Agent preset directory for a closed runtime. */
   shippedPresetRoot?: string
   /** Host setup completed after Loader installation and before config entries mount. */
@@ -239,6 +244,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     options.moduleFallback ?? 'links',
     options.shippedPresetRoot ?? fileURLToPath(new URL('../config/agent-presets', import.meta.url)),
     options.bareModuleBaseUrl,
+    options.bareModulePackages,
   )
   const app: { current?: Context } = {}
   const appReady = createAppReady()

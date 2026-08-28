@@ -50,13 +50,14 @@ kind: "package-reference"
 |---|---|---|
 | `default` | 必填 | 会话未指定时组装的 preset id |
 | `harnessBase` | loader context base | 高级嵌入器使用的文件 URL，其祖先 `node_modules` 提供 preset 行所引用的 package |
+| `resolvedPackages` | `[]` | 嵌入式宿主解析器提供、但磁盘 `node_modules` 中不存在的裸 package 根名称 |
 | `roots` | `[]` | 按优先级排列的扫描目录；每项提供 `path`（开头的 `~` 会展开）与 `trust`（默认为 `user`） |
 | `includeShippedRoot` | `true` | 在全部已配置根目录之前，前置本包随附的 preset 作为 `system` 根目录 |
 | `includeUserRoot` | `true` | 在全部已配置根目录之后追加 `<dshHome>/.agent-presets` 作为 `user` 根目录 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-agent-presets)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
-普通部署省略 `harnessBase`。如果单文件嵌入器的 package 只存在于虚拟文件系统中，它会把该字段设为已安装 package 树中的入口文件，让 roster 健康检查和 preset 挂载从同一个 harness 解析裸插件名。
+普通部署省略 `harnessBase` 与 `resolvedPackages`。嵌入器存在已安装 package 树时设置 `harnessBase`，并在 `resolvedPackages` 中列出仅由其模块解析器提供的 package 根名称。健康检查仍会在 harness 的磁盘 `node_modules` 中检查其他裸 package，因此用户 preset 引用未安装的第三方插件时仍会被标为损坏。
 
 随附根目录前置在全部已配置根目录之前，因此即使补丁替换 roster 配置，内置集合仍然可用并赢得重复 id。`includeShippedRoot: false` 会为完全自行提供 preset 的部署移除内置集合。`includeUserRoot: false` 会移除推导出的可写根目录；钉住确切 roster 的测试会同时关闭两个推导根目录。
 

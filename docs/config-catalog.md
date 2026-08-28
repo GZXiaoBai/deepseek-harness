@@ -124,6 +124,8 @@ export interface Config {
   default: string
   /** File URL whose ancestor `node_modules` supplies packages named by preset rows. Defaults to the Loader context base. */
   harnessBase?: string
+  /** Bare packages supplied by a host resolver instead of an on-disk `node_modules` tree. */
+  resolvedPackages?: string[]
   /** Scanned roots in precedence order; an earlier root wins a duplicate id. */
   roots: PresetRoot[]
   /**

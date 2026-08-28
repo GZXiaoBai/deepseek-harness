@@ -13,7 +13,7 @@ const DESKTOP_ROOT = join(REPOSITORY_ROOT, 'apps/desktop')
  * Creates the host-native Tauri package paths and arguments.
  *
  * @param {{ repoRoot: string, platform: NodeJS.Platform, arch: string, signedUpdates?: boolean }} input Host facts.
- * @returns {{ desktopRoot: string, releaseDirectory: string, rustTarget: string, installerName?: string, dmgName?: string, buildArguments: string[] }} Native package plan.
+ * @returns {{ desktopRoot: string, releaseDirectory: string, rustTarget: string, installerName?: string, dmgName?: string, sourceBuildArguments: string[], buildArguments: string[] }} Native package plan.
  */
 export function createTauriPackagePlan(input) {
   const repoRoot = resolve(input.repoRoot)
@@ -24,12 +24,14 @@ export function createTauriPackagePlan(input) {
   const updaterArguments = input.signedUpdates === true
     ? ['--config', 'src-tauri/tauri.updater.conf.json']
     : []
+  const sourceBuildArguments = ['--filter', '@deepseek-ai/dsh-desktop', 'run', 'build']
   if (input.platform === 'win32' && input.arch === 'x64') {
     const rustTarget = 'x86_64-pc-windows-msvc'
     return {
       desktopRoot,
       releaseDirectory,
       rustTarget,
+      sourceBuildArguments,
       installerName: `DeepSeek Harness Setup ${version}-x64.exe`,
       buildArguments: [
         'build', '--config', 'src-tauri/tauri.windows.conf.json', ...updaterArguments, '--target', rustTarget,
@@ -42,6 +44,7 @@ export function createTauriPackagePlan(input) {
       desktopRoot,
       releaseDirectory,
       rustTarget,
+      sourceBuildArguments,
       dmgName: `DeepSeek Harness-${version}-arm64.dmg`,
       buildArguments: [
         'build', '--config', 'src-tauri/tauri.macos.conf.json', ...updaterArguments, '--target', rustTarget,
@@ -73,6 +76,8 @@ export function createTauriSigningEnvironment(environment) {
  * @returns {Promise<void>} Resolves after the package artifacts have been collected.
  */
 export async function packageTauriDesktop(plan, signingEnvironment = {}) {
+  const pnpm = createPnpmCommand(process.env, process.execPath)
+  await run(pnpm.executable, [...pnpm.argsPrefix, ...plan.sourceBuildArguments], REPOSITORY_ROOT)
   await rm(plan.releaseDirectory, { recursive: true, force: true })
   await mkdir(plan.releaseDirectory, { recursive: true })
   await run(process.execPath, [join(plan.desktopRoot, 'scripts/build-icon.mjs')], REPOSITORY_ROOT)
@@ -80,7 +85,6 @@ export async function packageTauriDesktop(plan, signingEnvironment = {}) {
   await verifyDesktopSidecarFeasibility({ repoRoot: REPOSITORY_ROOT })
   // pnpm's legacy production deploy marks the shared workspace installation as
   // production-only. Restore the frozen developer graph before invoking Tauri.
-  const pnpm = createPnpmCommand(process.env, process.execPath)
   await run(
     pnpm.executable,
     [...pnpm.argsPrefix, 'install', '--frozen-lockfile'],

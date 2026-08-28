@@ -119,6 +119,27 @@ describe('the shipped preset root', () => {
     expect(embedded?.broken).toBeUndefined()
   })
 
+  it('accepts packages supplied by an embedded host resolver', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-resolver-preset-'))
+    const presetRoot = join(root, 'presets')
+    await mkdir(join(presetRoot, 'embedded'), { recursive: true })
+    await writeFile(
+      join(presetRoot, 'embedded', 'agent.cordis.yml'),
+      '- id: persona\n  name: \'@deepseek-ai/dsh-persona\'\n',
+    )
+
+    const ctx = await roster({
+      includeShippedRoot: false,
+      includeUserRoot: false,
+      roots: [{ path: presetRoot, trust: 'system' }],
+      resolvedPackages: ['@deepseek-ai/dsh-persona'],
+    } as unknown as Partial<Config>)
+
+    const [embedded] = await ctx.agentPresets.list()
+    expect(embedded).toMatchObject({ id: 'embedded' })
+    expect(embedded?.broken).toBeUndefined()
+  })
+
   it('enables web_fetch in each tool-bearing Web app preset', async () => {
     for (const id of ['cordis', 'ptc', 'standard']) {
       const source = await readFile(join(SHIPPED_PRESET_ROOT, id, 'agent.cordis.yml'), 'utf8')

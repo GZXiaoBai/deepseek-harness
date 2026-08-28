@@ -67,7 +67,7 @@ export function validateHarnessAgentPresetResponse(response) {
   }
   const standard = response.result.value?.presets?.find(candidate => candidate?.id === 'standard')
   if (standard?.trust !== 'system' || standard?.isDefault !== true || standard?.broken !== undefined) {
-    throw new Error('Harness packaged runtime has no usable default standard Agent preset')
+    throw new Error(`Harness packaged runtime has no usable default standard Agent preset: ${JSON.stringify(standard)}`)
   }
 }
 
@@ -119,13 +119,15 @@ export async function requireHarnessFunctionality(url, workspacePath, timeoutMs,
 
   const presets = await call('agentPresets/list', {})
   validateHarnessAgentPresetResponse(presets)
-  const workspace = await call('workspace/create', { path: workspacePath })
+  const workspace = await call('workspace/create', { request: { path: workspacePath } })
   if (workspace.result?.ok !== true || typeof workspace.result.value?.workspace?.workspaceId !== 'string') {
     throw new Error(`Harness workspace creation failed: ${JSON.stringify(workspace.result?.error ?? workspace)}`)
   }
   const session = await call('session/create', {
-    workspaceId: workspace.result.value.workspace.workspaceId,
-    agentPreset: 'standard',
+    request: {
+      workspaceId: workspace.result.value.workspace.workspaceId,
+      agentPreset: 'standard',
+    },
   })
   if (session.result?.ok !== true || session.result.value?.agentPreset !== 'standard') {
     throw new Error(`Harness standard session creation failed: ${JSON.stringify(session.result?.error ?? session)}`)

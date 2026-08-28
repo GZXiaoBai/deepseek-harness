@@ -187,7 +187,7 @@ describe('Tauri macOS package verification plan', () => {
           type: 'client-request',
           rpcId: 'desktop-verify-workspace/create',
           method: 'workspace/create',
-          payload: { args: { path: '/tmp/验证 工作区' } },
+          payload: { args: { request: { path: '/tmp/验证 工作区' } } },
         },
       },
       {
@@ -196,7 +196,7 @@ describe('Tauri macOS package verification plan', () => {
           type: 'client-request',
           rpcId: 'desktop-verify-session/create',
           method: 'session/create',
-          payload: { args: { workspaceId: 'workspace-1', agentPreset: 'standard' } },
+          payload: { args: { request: { workspaceId: 'workspace-1', agentPreset: 'standard' } } },
         },
       },
     ])

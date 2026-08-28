@@ -96,6 +96,7 @@ async function runDesktopSidecar(): Promise<void> {
         patchPath,
         import.meta.url,
         shippedPresetRoot,
+        packagedDependencies,
       ),
       prepareHost: (ctx) => {
         const internal = ctx.loader.internal

@@ -7,6 +7,7 @@ export interface DesktopSidecarProfileOptions<TEnvironment> {
   profile: 'web'
   moduleFallback: 'resolver'
   bareModuleBaseUrl: string
+  bareModulePackages: readonly string[]
   shippedPresetRoot: string
   patchFiles: readonly string[]
   args: readonly string[]
@@ -19,6 +20,7 @@ export interface DesktopSidecarProfileOptions<TEnvironment> {
  * @param patchPath App-owned patch replacing the native directory provider.
  * @param bareModuleBaseUrl VFS URL used by Cordis for in-box bare plugins.
  * @param shippedPresetRoot VFS directory containing the built-in Agent presets.
+ * @param bareModulePackages Package roots supplied by the sidecar resolver.
  * @returns Sidecar Web profile options with no default-browser handoff.
  */
 export function buildDesktopSidecarProfileOptions<TEnvironment>(
@@ -26,12 +28,14 @@ export function buildDesktopSidecarProfileOptions<TEnvironment>(
   patchPath: string,
   bareModuleBaseUrl: string,
   shippedPresetRoot: string,
+  bareModulePackages: readonly string[],
 ): DesktopSidecarProfileOptions<TEnvironment> {
   return {
     environment,
     profile: 'web',
     moduleFallback: 'resolver',
     bareModuleBaseUrl,
+    bareModulePackages,
     shippedPresetRoot,
     patchFiles: [patchPath],
     args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
