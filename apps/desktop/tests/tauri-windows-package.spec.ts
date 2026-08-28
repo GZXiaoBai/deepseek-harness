@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -12,6 +12,13 @@ const verifier = await import(
   findTauriNsisInstaller: (releaseDirectory: string) => Promise<string>
   parseTauriDirectoryPickerRequests: (text: string) => string[]
   parseTauriDesktopLifecycle: (text: string) => { pid: number; startCount: number; url: URL }
+  requireNativeDirectoryPicker: (
+    url: URL,
+    userData: string,
+    desktopPid: number,
+    fetchImpl?: typeof fetch,
+    closeDialog?: (pid: number) => Promise<void>,
+  ) => Promise<void>
   waitForTauriLifecycleOrExit: <T>(
     lifecycle: Promise<T>,
     exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
@@ -26,6 +33,7 @@ const {
   findTauriNsisInstaller,
   parseTauriDirectoryPickerRequests,
   parseTauriDesktopLifecycle,
+  requireNativeDirectoryPicker,
   waitForTauriLifecycleOrExit,
   validatePerformanceStats,
 } = verifier
@@ -94,6 +102,64 @@ describe('Tauri Windows package verification', () => {
       '3\tsidecar-stdout\tDSH_DESKTOP/1 {"type":"directory-picker-result","requestId":"picker-1","path":null}',
     ].join('\n')
     expect(parseTauriDirectoryPickerRequests(log)).toEqual(['picker-1'])
+  })
+
+  it('requires the boot session cookie on the native directory-picker probe', async () => {
+    const userData = await mkdtemp(join(tmpdir(), 'dsh-tauri-picker-'))
+    directories.push(userData)
+    await mkdir(join(userData, 'Logs'), { recursive: true })
+    await writeFile(
+      join(userData, 'Logs/desktop.log'),
+      '1\tsidecar-stdout\tDSH_DESKTOP/1 {"type":"directory-picker-request","requestId":"picker-1"}\n',
+    )
+    const seen: Array<{ url: string; cookie: string | null; body: unknown }> = []
+    const waitForLogRequest = async () => {
+      const logPath = join(userData, 'Logs/desktop.log')
+      for (let waited = 0; waited < 2_000; waited += 10) {
+        const requests = parseTauriDirectoryPickerRequests(await readFile(logPath, 'utf8'))
+        if (requests.length > 0) return
+        await new Promise(resolveDelay => setTimeout(resolveDelay, 10))
+      }
+      throw new Error('test stub never observed the desktop directory-picker request')
+    }
+    const rejectingFetch: typeof fetch = async (input, init) => {
+      const headers = new Headers(init?.headers)
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      seen.push({ url, cookie: headers.get('cookie'), body: JSON.parse(String(init?.body)) })
+      if (headers.get('cookie') === null) return new Response('dsh web authentication required', { status: 401 })
+      /* The real Host holds the RPC until the native parent reports the dialog result. */
+      await waitForLogRequest()
+      return Response.json({
+        type: 'server-response',
+        rpcId: 'desktop-verify-host.pickDirectory',
+        result: { ok: true, value: { path: null } },
+      })
+    }
+    const bootFetch: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers)
+      headers.set('cookie', 'dsh-auth-session=signed')
+      return rejectingFetch(input, { ...init, headers })
+    }
+    const probe = (fetchImpl: typeof fetch) => requireNativeDirectoryPicker(
+      new URL('http://127.0.0.1:43127/'),
+      userData,
+      process.pid,
+      fetchImpl,
+      async () => {},
+    )
+
+    await probe(bootFetch)
+    expect(seen).toEqual([{
+      url: 'http://127.0.0.1:43127/api/host.pickDirectory',
+      cookie: 'dsh-auth-session=signed',
+      body: {
+        type: 'client-request',
+        rpcId: 'desktop-verify-host.pickDirectory',
+        method: 'host.pickDirectory',
+        payload: {},
+      },
+    }])
+    await expect(probe(rejectingFetch)).rejects.toThrow(/HTTP 401/)
   })
 
   it('reports process output when the native shell exits before creating its log', async () => {

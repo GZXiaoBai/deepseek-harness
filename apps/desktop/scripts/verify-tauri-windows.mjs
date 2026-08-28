@@ -173,7 +173,7 @@ async function verifyLaunch(executable, cwd) {
       primaryExit,
       primaryOutput,
     )
-    await requirePage(lifecycle.url, userData)
+    const boot = await requirePage(lifecycle.url, userData)
     await requireFile(join(userData, 'Harness/profiles/web/cordis.yml'), 'Packaged Web profile was not initialized')
     const initialStats = await waitForPerformance(userData, false)
     if (initialStats.pageLoadedMs > MAX_CI_PAGE_LOAD_MS) {
@@ -182,7 +182,7 @@ async function verifyLaunch(executable, cwd) {
       )
     }
 
-    await requireNativeDirectoryPicker(lifecycle.url, userData, primary.pid)
+    await requireNativeDirectoryPicker(boot.url, userData, primary.pid, boot.fetch)
 
     const second = launch(executable, cwd, userData)
     const secondResult = await waitForExit(observeExit(second), STARTUP_TIMEOUT_MS, 'Second Tauri instance did not exit')
@@ -196,7 +196,7 @@ async function verifyLaunch(executable, cwd) {
     await new Promise(resolveDelay => setTimeout(resolveDelay, 200))
     requireProcessAlive(primary.pid, 'Windows close request exited the Tauri application instead of hiding it')
     requireProcessAlive(lifecycle.pid, 'Windows close request stopped the sidecar instead of hiding to tray')
-    const hiddenPage = await fetch(lifecycle.url, { signal: AbortSignal.timeout(500) })
+    const hiddenPage = await boot.fetch(boot.url, { signal: AbortSignal.timeout(500) })
     if (!hiddenPage.ok) throw new Error(`Hidden Tauri application returned HTTP ${hiddenPage.status}`)
     await waitForExit(primaryExit, SHUTDOWN_TIMEOUT_MS, 'Tauri application did not close')
     primary = undefined
@@ -319,11 +319,13 @@ async function requirePage(url, userData) {
   const workspacePath = join(userData, '验证 工作区')
   await mkdir(workspacePath, { recursive: true })
   await requireHarnessFunctionality(session.url, workspacePath, STARTUP_TIMEOUT_MS, session.fetch)
+  return session
 }
 
-async function requireNativeDirectoryPicker(url, userData, desktopPid) {
+/** Requires the Tauri parent to own directory picking, probed through the authenticated boot session. */
+export async function requireNativeDirectoryPicker(url, userData, desktopPid, fetchImpl = fetch, closeDialog = closeNativeFolderDialog) {
   const rpcId = 'desktop-verify-host.pickDirectory'
-  const response = fetch(new URL('/api/host.pickDirectory', url), {
+  const response = fetchImpl(new URL('/api/host.pickDirectory', url), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ type: 'client-request', rpcId, method: 'host.pickDirectory', payload: {} }),
@@ -344,7 +346,7 @@ async function requireNativeDirectoryPicker(url, userData, desktopPid) {
       throw new Error(`host.pickDirectory returned before the desktop protocol request: ${JSON.stringify(envelope)}`)
     }),
   ])
-  await closeNativeFolderDialog(desktopPid)
+  await closeDialog(desktopPid)
   const envelope = await response
   if (envelope?.type !== 'server-response' || envelope.rpcId !== rpcId
     || envelope.result?.ok !== true || envelope.result.value?.path !== null) {
