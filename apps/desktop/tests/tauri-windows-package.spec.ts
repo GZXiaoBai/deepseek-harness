@@ -127,8 +127,10 @@ describe('Tauri Windows package verification', () => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       seen.push({ url, cookie: headers.get('cookie'), body: JSON.parse(String(init?.body)) })
       if (headers.get('cookie') === null) return new Response('dsh web authentication required', { status: 401 })
-      /* The real Host holds the RPC until the native parent reports the dialog result. */
+      /* The real Host holds the RPC until the native parent reports the dialog result, so the
+         stub answers strictly after the delegation frame it observed is on record. */
       await waitForLogRequest()
+      await new Promise(resolveDelay => setTimeout(resolveDelay, 50))
       return Response.json({
         type: 'server-response',
         rpcId: 'desktop-verify-host.pickDirectory',
