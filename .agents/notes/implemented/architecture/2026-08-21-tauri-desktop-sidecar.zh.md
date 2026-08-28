@@ -10,7 +10,7 @@ Electron 桌面包在 Windows 上安装超过 32,000 个文件，总体积约 61
 
 ## Decision
 
-Tauri 2 负责原生窗口、菜单、导航策略、单实例聚焦、窗口状态、更新、目录对话框和后端进程监管。现有 Web UI 保持不变，不获得 Tauri shell、文件系统或通用 invoke 权限。窗口先显示内置的无脚本启动页，只在后端报告 `http://127.0.0.1:<port>/` 或带认证的 `http://127.0.0.1:<port>/?token=<URL-safe-token>` 格式后导航；空 token、重复参数和附加查询参数都会被拒绝。非预期导航和所有弹窗都会被拒绝，非回环 HTTP(S) 链接则交给系统浏览器。
+Tauri 2 负责原生窗口、菜单、导航策略、单实例聚焦、窗口状态、更新、目录对话框和后端进程监管。现有 Web UI 保持不变，不获得 Tauri shell、文件系统或通用 invoke 权限。窗口先显示内置的无脚本启动页，只在后端报告 `http://127.0.0.1:<port>/` 或带认证的 `http://127.0.0.1:<port>/?token=<URL-safe-token>` 格式后导航；空 token、重复参数和附加查询参数都会被拒绝。token 响应存入 `SameSite=Strict` 会话 Cookie 后，壳层会重新打开一次干净的回环根地址，使请求成为同站请求，而不继续沿用来自 `tauri://` 的跨站重定向链。非预期导航和所有弹窗都会被拒绝，非回环 HTTP(S) 链接则交给系统浏览器。
 
 `@yao-pkg/pkg --sea` 把 Node 24 Web 后端、内置插件、配置和 Web 静态资源打进一个目标平台专用的可执行文件。目标原生的 `node-pty`、ripgrep 与 macOS spawn helper 仍是相邻的普通二进制文件。sidecar 排除开发源码、source map、测试和文档。桌面专用 overlay 与 worker 输入不列入 npm 包文件清单，而是在 pkg 捕获 VFS 前显式复制到部署闭包。启动时的模块解析 hook 把打包后的 Cordis 与 Harness Service Definition peer 映射到 VFS 单例，同时允许 profile 插件及其私有依赖从磁盘解析；打包 profile 不会创建指向 VFS 的链接。客户端模块发现过程通过每个活动 Loader 配置项所属的树解析包 metadata，其中也包括嵌入式 VFS hook。桌面 profile 会把解析器生成的 package 清单传给 Agent preset 健康检查，因为 SEA 模块没有对应的磁盘 `node_modules` 项；清单以外的每个 package 仍使用已安装 harness 的文件系统检查。桌面启动器从打包的 `@deepseek-ai/dsh` manifest 推导随附 Agent preset 根目录，而不依赖导入模块的 `import.meta.url`；pkg 会把后者报告为 SEA 入口 URL。preset 发现过程先枚举子项名称，再分别执行 stat，因为 pkg VFS 不提供完整的 Node `Dirent` 方法。
 
@@ -36,6 +36,6 @@ Electron 实现在 Windows Server 2025 CI 与真实 Windows 11 x64 电脑通过�
 
 ## Consequences
 
-安装后的应用只含少量普通目标原生文件，不再携带 Node 依赖树或 Chromium 分发。实测 Apple Silicon alpha.1 App 包含 7 个文件和 246,502,403 字节；打包应用的清洁启动在 1.8 秒内完成页面加载，并且关闭时不需要强制终止。Windows 原生 CI 限制仍为 500 个文件、250 MB、安装 60 秒和首次页面加载 10 秒；真实 Windows 11 在开启 Defender 且未设排除项时的发布限制仍为安装 30 秒、冷启动 6 秒和热启动 3 秒。
+安装后的应用只含少量普通目标原生文件，不再携带 Node 依赖树或 Chromium 分发。实测 Apple Silicon alpha.1 App 包含 7 个文件和 246,506,179 字节；包含认证同站重开的隔离清洁启动在 3.4 秒内完成页面加载，并且关闭时不需要强制终止。Windows 原生 CI 限制仍为 500 个文件、250 MB、安装 60 秒和首次页面加载 10 秒；真实 Windows 11 在开启 Defender 且未设排除项时的发布限制仍为安装 30 秒、冷启动 6 秒和热启动 3 秒。
 
 sidecar 构建依赖 pkg 的 VFS 行为和显式 packaged-module 清单。原生打包前，真实可行性探针会执行 node-pty、worker thread、Koffi、Web 启动、带打包 peer 的外部磁盘插件以及优雅关闭。安装包验收会审计目标架构、链接包含性、签名、数据隔离、单实例行为、目录选择、关闭到托盘行为、进程清理和更新篡改拒绝。Server 2025 job 会安装微软官方 Evergreen WebView2 bootstrapper 作为 runner 准备；这不会改变应用负载，应用仍使用 Windows 11 系统运行时。启动验收会解析服务端提供的 `__DSH_BOOT__` 图，拒绝空图，要求 client-modules parser bootstrap，要求设置、Agent preset 和原生目录选择客户端条目，并请求所有声明的 bundle。随后它调用打包后的 `agentPreset.list`，创建路径包含中文与空格的工作区，再使用随附的 `standard` preset 创建会话。Windows 验证器还会调用 `host.pickDirectory`，要求出现版本化 sidecar 请求，关闭 Tauri 持有的文件夹对话框，并要求得到成功的取消结果；这样，直接调用 `workspace.create` 就不能掩盖错误的目录选择 provider。仅有 WebView load 事件并不足够，因为内核也可能渲染插件加载失败页面，或显示一个无法组装首个会话的外壳。Server 2025 结果不能替代真实 Windows 11 发布验收。

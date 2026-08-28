@@ -121,6 +121,18 @@ fn main() {
             {
                 let app = webview.app_handle();
                 let runtime = app.state::<DesktopRuntime>();
+                if let Some(url) = app
+                    .state::<NavigationState>()
+                    .take_authentication_reopen()
+                {
+                    if let Err(error) = webview.navigate(url) {
+                        runtime.log_line(
+                            "desktop",
+                            &format!("authenticated navigation reopen failed: {error}"),
+                        );
+                    }
+                    return;
+                }
                 runtime.record_page_loaded();
                 let automatic_updates =
                     updater::automatic_updates_enabled(&runtime.settings_path());

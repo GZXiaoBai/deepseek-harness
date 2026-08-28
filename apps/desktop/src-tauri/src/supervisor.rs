@@ -22,12 +22,14 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct NavigationState {
     origin: Mutex<Option<(String, String, u16)>>,
+    authentication_reopen: Mutex<Option<url::Url>>,
 }
 
 impl NavigationState {
     pub fn new() -> Self {
         Self {
             origin: Mutex::new(None),
+            authentication_reopen: Mutex::new(None),
         }
     }
 
@@ -76,7 +78,19 @@ impl NavigationState {
             .lock()
             .map_err(|_| "navigation state lock is poisoned")? =
             Some((parsed.scheme().to_owned(), host, port));
+        let mut clean = parsed.clone();
+        clean.set_query(None);
+        *self
+            .authentication_reopen
+            .lock()
+            .map_err(|_| "authentication navigation lock is poisoned")? =
+            parsed.query().map(|_| clean);
         Ok(())
+    }
+
+    /// Takes the one clean-root navigation required after a launch-token response.
+    pub fn take_authentication_reopen(&self) -> Option<url::Url> {
+        self.authentication_reopen.lock().ok()?.take()
     }
 }
 
@@ -640,5 +654,22 @@ mod tests {
         assert!(!navigation.opens_externally(&url::Url::parse("mailto:user@example.com").unwrap()));
         assert!(!navigation.opens_externally(&url::Url::parse("http://127.0.0.1:43128/").unwrap()));
         assert!(!navigation.opens_externally(&url::Url::parse("http://localhost:43127/").unwrap()));
+    }
+
+    #[test]
+    fn reopens_authenticated_ready_url_once_without_the_launch_token() {
+        let navigation = NavigationState::new();
+        navigation
+            .set_ready_url("http://127.0.0.1:43127/?token=abc_123-XYZ")
+            .unwrap();
+
+        assert_eq!(
+            navigation.take_authentication_reopen(),
+            Some(url::Url::parse("http://127.0.0.1:43127/").unwrap())
+        );
+        assert_eq!(navigation.take_authentication_reopen(), None);
+
+        navigation.set_ready_url("http://127.0.0.1:43127/").unwrap();
+        assert_eq!(navigation.take_authentication_reopen(), None);
     }
 }
