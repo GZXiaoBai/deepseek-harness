@@ -324,14 +324,14 @@ async function requirePage(url, userData) {
 
 /** Requires the Tauri parent to own directory picking, probed through the authenticated boot session. */
 export async function requireNativeDirectoryPicker(url, userData, desktopPid, fetchImpl = fetch, closeDialog = closeNativeFolderDialog) {
-  const rpcId = 'desktop-verify-host.pickDirectory'
-  const response = fetchImpl(new URL('/api/host.pickDirectory', url), {
+  const rpcId = 'desktop-verify-directoryPicker-pick'
+  const response = fetchImpl(new URL('/api/directoryPicker/pick', url), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'client-request', rpcId, method: 'host.pickDirectory', payload: {} }),
+    body: JSON.stringify({ type: 'client-request', rpcId, method: 'directoryPicker/pick', payload: { args: {} } }),
     signal: AbortSignal.timeout(STARTUP_TIMEOUT_MS),
   }).then(async (value) => {
-    if (!value.ok) throw new Error(`Harness host.pickDirectory returned HTTP ${value.status}`)
+    if (!value.ok) throw new Error(`Harness directoryPicker/pick returned HTTP ${value.status}`)
     return await value.json()
   })
   const requestObserved = waitFor(async () => {
@@ -343,13 +343,13 @@ export async function requireNativeDirectoryPicker(url, userData, desktopPid, fe
   await Promise.race([
     requestObserved,
     response.then((envelope) => {
-      throw new Error(`host.pickDirectory returned before the desktop protocol request: ${JSON.stringify(envelope)}`)
+      throw new Error(`directoryPicker/pick returned before the desktop protocol request: ${JSON.stringify(envelope)}`)
     }),
   ])
   await closeDialog(desktopPid)
   const envelope = await response
   if (envelope?.type !== 'server-response' || envelope.rpcId !== rpcId
-    || envelope.result?.ok !== true || envelope.result.value?.path !== null) {
+    || envelope.result?.ok !== true || envelope.result.value !== null) {
     throw new Error(`Tauri native folder dialog did not report cancellation: ${JSON.stringify(envelope)}`)
   }
 }

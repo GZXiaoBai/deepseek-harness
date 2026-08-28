@@ -133,8 +133,8 @@ describe('Tauri Windows package verification', () => {
       await new Promise(resolveDelay => setTimeout(resolveDelay, 50))
       return Response.json({
         type: 'server-response',
-        rpcId: 'desktop-verify-host.pickDirectory',
-        result: { ok: true, value: { path: null } },
+        rpcId: 'desktop-verify-directoryPicker-pick',
+        result: { ok: true, value: null },
       })
     }
     const bootFetch: typeof fetch = (input, init) => {
@@ -152,13 +152,13 @@ describe('Tauri Windows package verification', () => {
 
     await probe(bootFetch)
     expect(seen).toEqual([{
-      url: 'http://127.0.0.1:43127/api/host.pickDirectory',
+      url: 'http://127.0.0.1:43127/api/directoryPicker/pick',
       cookie: 'dsh-auth-session=signed',
       body: {
         type: 'client-request',
-        rpcId: 'desktop-verify-host.pickDirectory',
-        method: 'host.pickDirectory',
-        payload: {},
+        rpcId: 'desktop-verify-directoryPicker-pick',
+        method: 'directoryPicker/pick',
+        payload: { args: {} },
       },
     }])
     await expect(probe(rejectingFetch)).rejects.toThrow(/HTTP 401/)
