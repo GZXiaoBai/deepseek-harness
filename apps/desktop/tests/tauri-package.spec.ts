@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const { createTauriPackagePlan, createTauriSigningEnvironment } = await import(
+const { createTauriPackagePlan, createTauriSigningEnvironment, runWithDeveloperGraphRestore } = await import(
   pathToFileURL(join(import.meta.dirname, '../scripts/package-tauri.mjs')).href,
 ) as {
   createTauriPackagePlan: (input: {
@@ -20,6 +20,10 @@ const { createTauriPackagePlan, createTauriSigningEnvironment } = await import(
     buildArguments: string[]
   }
   createTauriSigningEnvironment: (environment: NodeJS.ProcessEnv) => NodeJS.ProcessEnv
+  runWithDeveloperGraphRestore: (
+    work: () => Promise<void>,
+    restore: () => Promise<void>,
+  ) => Promise<void>
 }
 
 describe('Tauri package plan', () => {
@@ -29,7 +33,7 @@ describe('Tauri package plan', () => {
     expect(createTauriPackagePlan({ repoRoot, platform: 'win32', arch: 'x64' })).toMatchObject({
       rustTarget: 'x86_64-pc-windows-msvc',
       releaseDirectory: join(repoRoot, 'apps/desktop/release-tauri'),
-      installerName: 'DeepSeek Harness Setup 0.1.2-alpha.1-x64.exe',
+      installerName: 'DeepSeek Harness Setup 0.1.2-alpha.4-x64.exe',
       buildArguments: [
         'build',
         '--config',
@@ -44,7 +48,7 @@ describe('Tauri package plan', () => {
     expect(createTauriPackagePlan({ repoRoot, platform: 'darwin', arch: 'arm64' })).toMatchObject({
       rustTarget: 'aarch64-apple-darwin',
       releaseDirectory: join(repoRoot, 'apps/desktop/release-tauri'),
-      dmgName: 'DeepSeek Harness-0.1.2-alpha.1-arm64.dmg',
+      dmgName: 'DeepSeek Harness-0.1.2-alpha.4-arm64.dmg',
       sourceBuildArguments: ['--filter', '@deepseek-ai/dsh-desktop', 'run', 'build'],
       buildArguments: [
         'build',
@@ -92,6 +96,30 @@ describe('Tauri package plan', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+
+  it('restores the developer dependency graph after a sidecar build failure', async () => {
+    const failure = new Error('sidecar failed')
+    const calls: string[] = []
+
+    await expect(runWithDeveloperGraphRestore(
+      async () => {
+        calls.push('work')
+        throw failure
+      },
+      async () => { calls.push('restore') },
+    )).rejects.toBe(failure)
+    expect(calls).toEqual(['work', 'restore'])
+  })
+
+  it('reports both sidecar and dependency-restore failures', async () => {
+    const workFailure = new Error('sidecar failed')
+    const restoreFailure = new Error('restore failed')
+
+    await expect(runWithDeveloperGraphRestore(
+      async () => { throw workFailure },
+      async () => { throw restoreFailure },
+    )).rejects.toMatchObject({ errors: [workFailure, restoreFailure] })
   })
 
   it.each([

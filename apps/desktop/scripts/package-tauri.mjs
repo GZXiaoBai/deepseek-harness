@@ -70,6 +70,36 @@ export function createTauriSigningEnvironment(environment) {
 }
 
 /**
+ * Restores the shared developer dependency graph after a production deploy attempt.
+ *
+ * @param {() => Promise<void>} work Operation that can leave the workspace production-only.
+ * @param {() => Promise<void>} restore Frozen developer installation restore.
+ * @returns {Promise<void>} Resolves when both work and restoration succeed.
+ */
+export async function runWithDeveloperGraphRestore(work, restore) {
+  let workFailed = false
+  let workError
+  try {
+    await work()
+  } catch (error) {
+    workFailed = true
+    workError = error
+  }
+  try {
+    await restore()
+  } catch (restoreError) {
+    if (workFailed) {
+      throw new AggregateError(
+        [workError, restoreError],
+        'Desktop sidecar build and developer dependency restoration both failed',
+      )
+    }
+    throw restoreError
+  }
+  if (workFailed) throw workError
+}
+
+/**
  * Builds and collects one host-native Tauri package without touching Electron artifacts.
  *
  * @param {ReturnType<typeof createTauriPackagePlan>} plan Native package plan.
@@ -81,14 +111,18 @@ export async function packageTauriDesktop(plan, signingEnvironment = {}) {
   await rm(plan.releaseDirectory, { recursive: true, force: true })
   await mkdir(plan.releaseDirectory, { recursive: true })
   await run(process.execPath, [join(plan.desktopRoot, 'scripts/build-icon.mjs')], REPOSITORY_ROOT)
-  await buildDesktopSidecar()
-  await verifyDesktopSidecarFeasibility({ repoRoot: REPOSITORY_ROOT })
   // pnpm's legacy production deploy marks the shared workspace installation as
   // production-only. Restore the frozen developer graph before invoking Tauri.
-  await run(
-    pnpm.executable,
-    [...pnpm.argsPrefix, 'install', '--frozen-lockfile'],
-    REPOSITORY_ROOT,
+  await runWithDeveloperGraphRestore(
+    async () => {
+      await buildDesktopSidecar()
+      await verifyDesktopSidecarFeasibility({ repoRoot: REPOSITORY_ROOT })
+    },
+    async () => await run(
+      pnpm.executable,
+      [...pnpm.argsPrefix, 'install', '--frozen-lockfile'],
+      REPOSITORY_ROOT,
+    ),
   )
   await run(
     process.execPath,
