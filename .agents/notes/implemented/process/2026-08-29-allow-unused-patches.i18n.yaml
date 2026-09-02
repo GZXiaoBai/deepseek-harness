@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-29-allow-unused-patches.md
-2026-08-29-allow-unused-patches.md: 114be9981e927899fe6e60f11fbc84d6ddcf2ca2
-2026-08-29-allow-unused-patches.zh.md: d728bd5eab229f6b468892f7008786c571514c66
+2026-08-29-allow-unused-patches.md: 6be6621b025cdf0ed3065c4d4d9b14e16db77801
+2026-08-29-allow-unused-patches.zh.md: a9e2e2fcefae211a5069ee5818a5e79680ac0822

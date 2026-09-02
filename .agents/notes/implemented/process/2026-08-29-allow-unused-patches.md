@@ -12,7 +12,7 @@ English | [中文](2026-08-29-allow-unused-patches.zh.md)
 
 `pnpm-workspace.yaml` sets `allowUnusedPatches: true`, so a patch whose target is absent from the current install or deploy subset warns instead of failing the command. Patches still apply wherever their target exists — the deployed closure keeps the patched `node-pty` build (verified by the `DSH_NODE_PTY_SPAWN_HELPER` marker surviving in the deployed tree).
 
-## Alternatives
+## Alternatives considered
 
 - Removing the osx-sign patch: rejected; the desktop Electron mac packaging still needs the bounded binary inspection until the Tauri implementation fully retires the Electron path.
 - Dropping `--legacy` deploy: rejected; the Python runtime packaging owns hoisting, link-materialization, and symlink-free payload invariants built on the legacy deploy implementation.

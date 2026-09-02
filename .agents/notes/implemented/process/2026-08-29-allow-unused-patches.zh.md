@@ -12,7 +12,7 @@ Python runtime 闭包的 `pnpm deploy --legacy --prod` 在所有 release 形态�
 
 `pnpm-workspace.yaml` 设置 `allowUnusedPatches: true`，让目标包不在当前安装或部署子集中的 patch 降级为警告而不是使命令失败。patch 在目标存在的地方仍然生效——部署后的闭包保留打了补丁的 `node-pty` 构建（已通过部署树中存留的 `DSH_NODE_PTY_SPAWN_HELPER` 标记验证）。
 
-## 备选方案
+## 已考虑的备选方案
 
 - 移除 osx-sign patch：拒绝；在 Tauri 实现完全取代 Electron 路径之前，桌面 Electron mac 打包仍依赖有界二进制检查。
 - 放弃 `--legacy` 部署：拒绝；Python runtime 打包的提升（hoisting）、链接物化和无符号链接负载等不变式都建立在 legacy deploy 实现之上。
