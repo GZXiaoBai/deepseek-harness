@@ -17,7 +17,10 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
-const PKG_SPEC = '@yao-pkg/pkg@6.21.0'
+const repositoryRequire = createRequire(import.meta.url)
+const PKG_MANIFEST = repositoryRequire.resolve('@yao-pkg/pkg/package.json')
+const PKG_CLI = join(dirname(PKG_MANIFEST), 'lib-es5/bin.js')
+const SIDECAR_NODE_VERSION = '24.20.0'
 const ENTRY_BIN = 'node_modules/@deepseek-ai/dsh-desktop/lib/sidecar-bin.js'
 const PACKAGED_MODULE_ROSTER_MARKER = '["__DSH_DESKTOP_MODULE_ROSTER__"]'
 const NON_IMPORTABLE_PACKAGES = new Set([
@@ -55,11 +58,11 @@ export function createSidecarBuildPlan(input) {
   let rustTarget
   let executableSuffix
   if (input.platform === 'darwin' && input.arch === 'arm64') {
-    pkgTarget = 'node24-macos-arm64'
+    pkgTarget = `node${SIDECAR_NODE_VERSION}-macos-arm64`
     rustTarget = 'aarch64-apple-darwin'
     executableSuffix = ''
   } else if (input.platform === 'win32' && input.arch === 'x64') {
-    pkgTarget = 'node24-win-x64'
+    pkgTarget = `node${SIDECAR_NODE_VERSION}-win-x64`
     rustTarget = 'x86_64-pc-windows-msvc'
     executableSuffix = '.exe'
   } else {
@@ -108,6 +111,44 @@ export function createPnpmCommand(environment, nodePath) {
   const pnpmScript = environment.npm_execpath?.trim()
   if (!pnpmScript) throw new Error('Desktop packaging requires npm_execpath from the pnpm package script')
   return { executable: nodePath, argsPrefix: [pnpmScript] }
+}
+
+/** Returns the environment that compiles ABI-bound addons for the SEA Node release. */
+export function createNativeTargetEnvironment(environment, nodeVersion) {
+  return {
+    ...environment,
+    npm_config_runtime: 'node',
+    npm_config_target: nodeVersion.replace(/^v/, ''),
+  }
+}
+
+/** Returns the shell-free node-gyp invocation for one ABI-bound addon. */
+export function createNativeAddonBuildCommand(nodePath, nodeGypPath, packageDirectory, nodeVersion) {
+  return {
+    executable: nodePath,
+    args: [
+      nodeGypPath,
+      'rebuild',
+      `--directory=${packageDirectory}`,
+      `--target=${nodeVersion.replace(/^v/, '')}`,
+    ],
+  }
+}
+
+/** Returns the pinned repository pkg invocation that builds one SEA target. */
+export function createPkgBuildCommand(nodePath, pkgCliPath, stagingDirectory, pkgTarget, outputPath) {
+  return {
+    executable: nodePath,
+    args: [
+      pkgCliPath,
+      stagingDirectory,
+      '--sea',
+      '--targets',
+      pkgTarget,
+      '--output',
+      outputPath,
+    ],
+  }
 }
 
 /** Returns the sorted exact package names the VFS resolver must own. */
@@ -192,6 +233,7 @@ export async function buildDesktopSidecar() {
   })
   const verify = createSidecarVerifyCommand(REPOSITORY_ROOT, process.execPath)
   const pnpm = createPnpmCommand(process.env, process.execPath)
+  const nodeGypCli = repositoryRequire.resolve('node-gyp/bin/node-gyp.js')
   await run('verify runtime closure', verify.executable, verify.args)
   await rm(plan.stagingDirectory, { recursive: true, force: true })
   await run(
@@ -202,20 +244,13 @@ export async function buildDesktopSidecar() {
   await restoreLegacyHoists(plan.stagingDirectory)
   await materializeStagedLinks(plan.stagingDirectory)
   await stageDesktopSidecarAssets(REPOSITORY_ROOT, plan.stagingDirectory)
+  await rebuildNativeAddons(plan.stagingDirectory, nodeGypCli)
   await pruneNodePtyPrebuilds(plan.stagingDirectory, process.platform, process.arch)
   await pruneStagedRuntime(plan.stagingDirectory)
   await injectPkgConfig(plan.stagingDirectory)
   await mkdir(dirname(plan.outputPath), { recursive: true })
-  await run('build Node 24 SEA', pnpm.executable, [...pnpm.argsPrefix,
-    'dlx',
-    PKG_SPEC,
-    plan.stagingDirectory,
-    '--sea',
-    '--targets',
-    plan.pkgTarget,
-    '--output',
-    plan.outputPath,
-  ])
+  const pkg = createPkgBuildCommand(process.execPath, PKG_CLI, plan.stagingDirectory, plan.pkgTarget, plan.outputPath)
+  await run('build Node 24 SEA', pkg.executable, pkg.args)
   if (!existsSync(plan.outputPath)) throw new Error(`Desktop sidecar output is missing: ${plan.outputPath}`)
   await chmod(plan.outputPath, 0o755)
   await copyNativeSidecars(plan.stagingDirectory, plan, process.platform, process.arch)
@@ -277,6 +312,23 @@ async function materializeStagedLinks(stagingDirectory) {
     }
     link = await findSymlink(nodeModules)
   }
+}
+
+async function rebuildNativeAddons(stagingDirectory, nodeGypCli) {
+  const runtimeRequire = createRequire(join(stagingDirectory, 'package.json'))
+  const fsExtManifest = runtimeRequire.resolve('fs-ext/package.json')
+  const command = createNativeAddonBuildCommand(
+    process.execPath,
+    nodeGypCli,
+    dirname(fsExtManifest),
+    SIDECAR_NODE_VERSION,
+  )
+  await run(
+    'rebuild Node 24 native addons',
+    command.executable,
+    command.args,
+    createNativeTargetEnvironment(process.env, SIDECAR_NODE_VERSION),
+  )
 }
 
 async function findSymlink(directory) {
@@ -363,13 +415,13 @@ async function copyNativeSidecars(stagingDirectory, plan, platform, arch) {
   await chmod(helperOutput, 0o755)
 }
 
-async function run(label, executable, args) {
+async function run(label, executable, args, environment = process.env) {
   console.log(`desktop sidecar: ${label}`)
   await new Promise((resolveRun, rejectRun) => {
     const child = spawn(executable, args, {
       cwd: REPOSITORY_ROOT,
       stdio: 'inherit',
-      env: { ...process.env, CI: 'true' },
+      env: { ...environment, CI: 'true' },
     })
     child.once('error', rejectRun)
     child.once('exit', (code, signal) => {

@@ -33,7 +33,7 @@ describe('Tauri package plan', () => {
     expect(createTauriPackagePlan({ repoRoot, platform: 'win32', arch: 'x64' })).toMatchObject({
       rustTarget: 'x86_64-pc-windows-msvc',
       releaseDirectory: join(repoRoot, 'apps/desktop/release-tauri'),
-      installerName: 'DeepSeek Harness Setup 0.1.2-rc.1-x64.exe',
+      installerName: 'DeepSeek Harness Setup 0.1.3-alpha.1-x64.exe',
       buildArguments: [
         'build',
         '--config',
@@ -48,7 +48,7 @@ describe('Tauri package plan', () => {
     expect(createTauriPackagePlan({ repoRoot, platform: 'darwin', arch: 'arm64' })).toMatchObject({
       rustTarget: 'aarch64-apple-darwin',
       releaseDirectory: join(repoRoot, 'apps/desktop/release-tauri'),
-      dmgName: 'DeepSeek Harness-0.1.2-rc.1-arm64.dmg',
+      dmgName: 'DeepSeek Harness-0.1.3-alpha.1-arm64.dmg',
       sourceBuildArguments: ['--filter', '@deepseek-ai/dsh-desktop', 'run', 'build'],
       buildArguments: [
         'build',

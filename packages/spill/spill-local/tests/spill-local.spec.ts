@@ -267,7 +267,7 @@ describe('startup cleanup sweep', () => {
   it('keeps a file exactly at the boundary (only strictly-older expires)', async () => {
     const dir = sessionDir(root, 'sess-1')
     mkdirSync(dir, { recursive: true })
-    const cutoffMs = Date.now() - 30 * DAY_MS
+    const cutoffMs = Math.floor((Date.now() - 30 * DAY_MS) / 1000) * 1000
     const boundary = join(dir, 'boundary.txt')
     writeFileSync(boundary, 'x')
     utimesSync(boundary, cutoffMs / 1000, cutoffMs / 1000)

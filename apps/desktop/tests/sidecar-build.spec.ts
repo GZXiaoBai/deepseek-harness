@@ -17,6 +17,20 @@ const buildModule = await import(pathToFileURL(join(import.meta.dirname, '../scr
     executable: string
     argsPrefix: string[]
   }
+  createPkgBuildCommand(
+    nodePath: string,
+    pkgCliPath: string,
+    stagingDirectory: string,
+    pkgTarget: string,
+    outputPath: string,
+  ): { executable: string; args: string[] }
+  createNativeTargetEnvironment(environment: NodeJS.ProcessEnv, nodeVersion: string): NodeJS.ProcessEnv
+  createNativeAddonBuildCommand(
+    nodePath: string,
+    nodeGypPath: string,
+    packageDirectory: string,
+    nodeVersion: string,
+  ): { executable: string; args: string[] }
   createPackagedModuleList(manifest: { dependencies?: Record<string, string> }): string[]
   createSidecarVerifyCommand(repoRoot: string, nodePath: string): { executable: string; args: string[] }
   injectPackagedModuleRoster(source: string, packageNames: readonly string[]): string
@@ -42,6 +56,46 @@ describe('desktop SEA sidecar build', () => {
     expect(buildModule.createPnpmCommand({ npm_execpath: 'C:/pnpm/bin/pnpm.cjs' }, 'C:/node.exe'))
       .toEqual({ executable: 'C:/node.exe', argsPrefix: ['C:/pnpm/bin/pnpm.cjs'] })
     expect(() => buildModule.createPnpmCommand({}, '/node')).toThrow('npm_execpath')
+  })
+
+  it('builds native addons and the SEA against the same pinned Node release', () => {
+    expect(buildModule.createNativeTargetEnvironment({ KEEP: 'yes' }, 'v24.20.0')).toEqual({
+      KEEP: 'yes',
+      npm_config_runtime: 'node',
+      npm_config_target: '24.20.0',
+    })
+    expect(buildModule.createPkgBuildCommand(
+      '/node',
+      '/repo/node_modules/@yao-pkg/pkg/lib-es5/bin.js',
+      '/repo/apps/desktop/.sidecar-runtime',
+      'node24.20.0-macos-arm64',
+      '/repo/apps/desktop/src-tauri/binaries/dsh-desktop-sidecar-aarch64-apple-darwin',
+    )).toEqual({
+      executable: '/node',
+      args: [
+        '/repo/node_modules/@yao-pkg/pkg/lib-es5/bin.js',
+        '/repo/apps/desktop/.sidecar-runtime',
+        '--sea',
+        '--targets',
+        'node24.20.0-macos-arm64',
+        '--output',
+        '/repo/apps/desktop/src-tauri/binaries/dsh-desktop-sidecar-aarch64-apple-darwin',
+      ],
+    })
+    expect(buildModule.createNativeAddonBuildCommand(
+      '/node',
+      '/repo/node_modules/node-gyp/bin/node-gyp.js',
+      '/repo/apps/desktop/.sidecar-runtime/node_modules/fs-ext',
+      'v24.20.0',
+    )).toEqual({
+      executable: '/node',
+      args: [
+        '/repo/node_modules/node-gyp/bin/node-gyp.js',
+        'rebuild',
+        '--directory=/repo/apps/desktop/.sidecar-runtime/node_modules/fs-ext',
+        '--target=24.20.0',
+      ],
+    })
   })
 
   it('runs the closure verifier without asking pnpm to reconcile the workspace install', () => {
@@ -163,7 +217,7 @@ describe('desktop SEA sidecar build', () => {
           root,
           'apps/desktop/src-tauri/binaries/dsh-desktop-sidecar-aarch64-apple-darwin',
         ),
-        pkgTarget: 'node24-macos-arm64',
+        pkgTarget: 'node24.20.0-macos-arm64',
         rustTarget: 'aarch64-apple-darwin',
         executableSuffix: '',
       })
@@ -189,7 +243,7 @@ describe('desktop SEA sidecar build', () => {
     const root = resolve('C:/checkout')
     const plan = buildModule.createSidecarBuildPlan({ repoRoot: root, platform: 'win32', arch: 'x64' })
 
-    expect(plan.pkgTarget).toBe('node24-win-x64')
+    expect(plan.pkgTarget).toBe('node24.20.0-win-x64')
     expect(plan.rustTarget).toBe('x86_64-pc-windows-msvc')
     expect(plan.outputPath).toBe(join(
       root,
