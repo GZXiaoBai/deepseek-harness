@@ -26,6 +26,8 @@ kind: "package-library"
 
 ### 校验 JSON 数据或创建快照
 
+内建原型检查将构造函数与当前引擎的原生表示比较，在 V8 和 WebKit 中接受跨 realm 的普通容器，不依赖原生函数字符串的空白格式。
+
 需要 predicate 时使用 `isJsonValue()`，还需要分离副本时使用 `snapshotJsonValue()`。两者只接受无损 JSON 根值：`null`、布尔值、除负零外的有限数字、字符串、稠密的内建数组，以及只含可枚举字符串键的普通或 null-prototype 记录。循环、稀疏数组、自有 symbol 或不可枚举属性、函数和 class 实例都会被拒绝。
 
 ```ts

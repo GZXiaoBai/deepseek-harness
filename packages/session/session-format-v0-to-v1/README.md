@@ -31,6 +31,8 @@ Persistence obtains this edge through `dsh-session-format-catalog`; feature comp
 
 ### Entry point
 
+Historical `permission/preset.origin` accepts only `default`, `selection`, or `inferred` and survives migration unchanged; it does not override the recorded permission knobs.
+
 ```text
 const decodedV0 = releasedV0SessionFormatCodec.decodeArtifact(header, rows)
 const migratedV1 = sessionFormatV0ToV1.migrate(decodedV0)

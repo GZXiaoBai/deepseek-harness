@@ -32,6 +32,8 @@ Projection-cache records bind their fold to the Session header's `formatVersion`
 
 ## Consequences
 
+Historical permission selections can carry the `origin` values `default`, `selection`, and `inferred`, emitted by the permission-preset implementation before its origin tracking was reverted. The frozen payload inventory admits these exact values through v0, v1, and v2 and retains them without changing the effective preset or execution-knob events. Rejecting every additional member would strand these valid histories; discarding origin would lose their recorded selection provenance.
+
 Reading event bodies with a newer build may durably add a higher generation. The exact old generation remains available, but the runtime thereafter selects the highest canonical filename; retention does not promise that an older build can safely downgrade or that the newer build will fall back when the successor is corrupt. A read-only filesystem reports an actionable migration failure instead of returning an in-memory current view that differs from disk.
 
 JSONL publication uses POSIX hard-link creation plus directory sync, and Windows uses no-overwrite `MoveFileExW` with write-through. A competing writer that wins target creation is accepted only when the committed bytes exactly match. One process-local writer per Session is the supported concurrency model. A future per-Session cross-process lock can close the remaining source-check-to-publication race without changing the format edge interface.

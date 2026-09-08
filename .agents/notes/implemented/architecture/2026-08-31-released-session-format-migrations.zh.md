@@ -32,6 +32,8 @@ JSONL provider 在 `open` 为已存储 Session 返回句柄前完成 ensure-curr
 
 ## 后果
 
+历史权限选择可能携带 `origin` 值 `default`、`selection` 和 `inferred`，这些值由来源跟踪被回退前的 permission-preset 实现写入。冻结的 payload 清单在 v0、v1 和 v2 中接受这些精确值并予以保留，不改变有效 preset 或执行开关事件。拒绝所有附加成员会使这些有效历史无法读取；丢弃 origin 则会失去已记录的选择来源。
+
 较新 build 读取事件正文时可能持久增加一个更高 generation。精确旧 generation 仍然可用，但 runtime 此后选择最高规范文件名；保留不承诺旧 build 能安全 downgrade，也不保证新 build 在后继损坏时 fallback。只读文件系统会报告可操作的迁移失败，而不会返回与磁盘不一致的内存当前视图。
 
 JSONL 发布在 POSIX 上使用硬链接创建与目录同步，在 Windows 上使用 write-through 且不覆盖的 `MoveFileExW`。竞争 writer 已先创建目标时，只有已提交字节完全匹配才接受。每个 Session 只支持一个进程内 writer。未来逐 Session 跨进程锁可以关闭剩余的源检查到发布竞态，而无需改变格式迁移边接口。

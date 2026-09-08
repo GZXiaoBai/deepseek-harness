@@ -2,6 +2,25 @@ import { describe, expect, it } from 'vitest'
 import { sessionFormatCatalog } from '../src/index.ts'
 
 describe('first-party Session format catalog', () => {
+  it.each(['default', 'selection', 'inferred'])('preserves historical permission origin %s through v0 to v2', (origin) => {
+    const header = { type: 'session', version: 0, id: 'historical-permission', createdAt: 1, delegationDepth: 0 }
+    const rows = [{ type: 'permission/preset', seq: 0, time: 1, data: { preset: 'workspace-write', origin } }]
+    const source = structuredClone(rows)
+    const migrated = sessionFormatCatalog.migrate(sessionFormatCatalog.decodeArtifact(header, rows))
+    expect(migrated.header.version).toBe(2)
+    expect(migrated.events).toEqual(source)
+    expect(rows).toEqual(source)
+    const encoded = sessionFormatCatalog.encodeCurrent(migrated)
+    expect(sessionFormatCatalog.migrate(sessionFormatCatalog.decodeArtifact(encoded.header, encoded.rows)).events)
+      .toEqual(source)
+  })
+
+  it.each(['unknown', '', null, 1])('refuses malformed historical permission origin %j', (origin) => {
+    const header = { type: 'session', version: 0, id: 'invalid-permission', createdAt: 1, delegationDepth: 0 }
+    const rows = [{ type: 'permission/preset', seq: 0, time: 1, data: { preset: 'default', origin } }]
+    expect(() => sessionFormatCatalog.migrate(sessionFormatCatalog.decodeArtifact(header, rows))).toThrow(/origin/)
+  })
+
   it('statically owns the complete adjacent v0 to v2 chain', () => {
     const header = {
       type: 'session',

@@ -1,5 +1,5 @@
 import { runInNewContext } from 'node:vm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { isJsonValue, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 
 function objectWithForgedIntrinsicPrototype(revoked = false): Record<string, unknown> {
@@ -14,6 +14,24 @@ function objectWithForgedIntrinsicPrototype(revoked = false): Record<string, unk
 }
 
 describe('snapshotJsonValue', () => {
+  it('accepts JSON with the engine-native constructor whitespace while rejecting forged prototypes', () => {
+    const original = Object.getOwnPropertyDescriptor(Function.prototype, 'toString')!.value as (this: unknown) => string
+    const nativeSource = vi.spyOn(Function.prototype, 'toString').mockImplementation(function (this: unknown) {
+      const source = original.call(this)
+      return source === 'function Object() { [native code] }' || source === 'function Array() { [native code] }'
+        ? source.replace('{ [native code] }', '{\n    [native code]\n}')
+        : source
+    })
+    try {
+      const value = { nested: [{ type: 'finish', reason: { kind: 'stop' } }] }
+      expect(snapshotJsonValue(value)).toEqual(value)
+      expect(isJsonValue(value)).toBe(true)
+      expect(isJsonValue(objectWithForgedIntrinsicPrototype())).toBe(false)
+    } finally {
+      nativeSource.mockRestore()
+    }
+  })
+
   it('copies the complete JSON scalar vocabulary and rejects unsupported scalars', () => {
     const unsupportedFunction = (): void => {}
 

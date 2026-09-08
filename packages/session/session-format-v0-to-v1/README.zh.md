@@ -36,6 +36,8 @@ const decodedV0 = releasedV0SessionFormatCodec.decodeArtifact(header, rows)
 const migratedV1 = sessionFormatV0ToV1.migrate(decodedV0)
 ```
 
+历史 `permission/preset.origin` 仅接受 `default`、`selection` 或 `inferred`，迁移时原样保留，不覆盖已记录的权限开关。
+
 `releasedV0SessionFormatCodec` 读取精确的 v0 标头与物理行，包括打包的 Assistant 增量和范围编码的来源序号。`sessionFormatV0ToV1` 规范化并严格校验一个完整且分离的产物。`releasedV1SessionFormatCodec` 在不冻结普通事件词表的前提下保留 v1 物理布局；目录会根据已安装的 Session 包还原当前事件。
 
 Alpha 迁移边会拒绝冻结清单之外的所有事件类型，包括带有 `ignorable: true` 标记的未知事件。它也会拒绝意外的 payload 成员。`tool/result.meta` 与嵌套 PTC `arguments` 是显式的不透明 JSON 字段；迁移会原样保留它们，不把其中的数字解释为 Session 序号。未知 content-block `type`、message-source `kind`、assistant finish-reason `kind` 与 `turn/end` reason `kind` 分支保持 owner-opaque JSON，已知分支则接受结构校验。

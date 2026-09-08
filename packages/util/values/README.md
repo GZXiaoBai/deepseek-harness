@@ -26,6 +26,8 @@ English | [中文](README.zh.md)
 
 ### Validate or snapshot JSON data
 
+Intrinsic prototype checks compare constructors with the current engine's native representation. They accept plain containers across realms on V8 and WebKit without depending on native-function whitespace.
+
 Use `isJsonValue()` for a predicate and `snapshotJsonValue()` when the caller also needs a detached copy. Both accept only lossless JSON roots: `null`, booleans, finite numbers other than negative zero, strings, dense intrinsic arrays, and plain or null-prototype records with enumerable string keys. Cycles, sparse arrays, symbol or non-enumerable own properties, functions, and class instances are rejected.
 
 ```ts
