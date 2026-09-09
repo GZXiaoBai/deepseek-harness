@@ -33,7 +33,7 @@ if (process.argv.includes('--ignoring-descendant')) {
 
     const announce = () => {
       process.stdout.write(`dsh web: http://127.0.0.1:${address.port}\n`)
-      if (mode === 'exit-later') setTimeout(() => process.exit(7), 30)
+      if (mode === 'exit-later') setTimeout(() => process.exit(7), process.platform === 'win32' ? 200 : 30)
     }
 
     if (mode === 'delayed-ready') {
