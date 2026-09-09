@@ -406,8 +406,8 @@ async function resolveEsbuildExecutable() {
       .reverse()
     for (const candidate of candidates) {
       const packageBin = join(virtualStore, candidate, 'node_modules/esbuild/bin/esbuild')
+      if (process.platform === 'win32' && existsSync(`${packageBin}.exe`)) return `${packageBin}.exe`
       if (existsSync(packageBin)) return packageBin
-      if (existsSync(`${packageBin}.exe`)) return `${packageBin}.exe`
     }
   }
   if (existsSync(direct)) return direct
