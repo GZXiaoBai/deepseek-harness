@@ -368,20 +368,14 @@ async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
   const source = join(stagingDirectory, 'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/worker.cjs')
   const destination = join(desktopRoot, 'src-tauri/resources/dsh-session-worker.cjs')
   await mkdir(dirname(destination), { recursive: true })
-  const esbuild = await resolveEsbuildExecutable()
   const desktopManifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
   await run(
     'bundle session persistence worker',
-    esbuild,
+    process.execPath,
     [
+      join(REPOSITORY_ROOT, 'apps/desktop/scripts/bundle-session-worker.mjs'),
       source,
-      '--bundle',
-      '--platform=node',
-      '--format=cjs',
-      '--outfile=' + destination,
-      '--external:node:*',
-      '--define:import.meta.url=__DSH_IMPORT_META_URL',
-      '--banner:js=var __DSH_IMPORT_META_URL = require("node:url").pathToFileURL(__filename).href; var __DSH_IMPORT_META_DIRNAME = require("node:path").dirname(__filename);',
+      destination,
     ],
   )
   let bundled = await readFile(destination, 'utf8')
@@ -392,26 +386,6 @@ async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
     `version = ${JSON.stringify(desktopManifest.version)};`,
   )
   await writeFile(destination, bundled)
-}
-
-/** Locate the host-native esbuild binary after pnpm has pruned root shims. */
-async function resolveEsbuildExecutable() {
-  const direct = join(REPOSITORY_ROOT, 'node_modules/.bin/esbuild')
-  if (process.platform !== 'win32' && existsSync(direct)) return direct
-  const virtualStore = join(REPOSITORY_ROOT, 'node_modules/.pnpm')
-  if (existsSync(virtualStore)) {
-    const candidates = (await readdir(virtualStore))
-      .filter(name => name.startsWith('esbuild@'))
-      .sort()
-      .reverse()
-    for (const candidate of candidates) {
-      const packageBin = join(virtualStore, candidate, 'node_modules/esbuild/bin/esbuild')
-      if (process.platform === 'win32' && existsSync(`${packageBin}.exe`)) return `${packageBin}.exe`
-      if (existsSync(packageBin)) return packageBin
-    }
-  }
-  if (existsSync(direct)) return direct
-  throw new Error('Desktop sidecar build requires a host-native esbuild binary')
 }
 
 async function findSymlink(directory) {
