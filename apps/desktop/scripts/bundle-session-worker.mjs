@@ -12,8 +12,8 @@ if (source === undefined || destination === undefined) {
 
 const esbuildMain = await findEsbuildMain()
 const require = createRequire(esbuildMain)
-const { build } = require(esbuildMain)
-await build({
+const { buildSync } = require(esbuildMain)
+buildSync({
   entryPoints: [source],
   bundle: true,
   platform: 'node',
