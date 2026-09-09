@@ -369,6 +369,7 @@ async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
   const destination = join(desktopRoot, 'src-tauri/resources/dsh-session-worker.cjs')
   await mkdir(dirname(destination), { recursive: true })
   const esbuild = await resolveEsbuildExecutable()
+  const desktopManifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
   await run(
     'bundle session persistence worker',
     esbuild,
@@ -379,8 +380,18 @@ async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
       '--format=cjs',
       '--outfile=' + destination,
       '--external:node:*',
+      '--define:import.meta.url=__DSH_IMPORT_META_URL',
+      '--banner:js=var __DSH_IMPORT_META_URL = require("node:url").pathToFileURL(__filename).href; var __DSH_IMPORT_META_DIRNAME = require("node:path").dirname(__filename);',
     ],
   )
+  let bundled = await readFile(destination, 'utf8')
+  bundled = bundled.replace(/\b(import_meta\d*) = \{\};/g,
+    '$1 = { url: __DSH_IMPORT_META_URL, dirname: __DSH_IMPORT_META_DIRNAME };')
+  bundled = bundled.replace(
+    '({ version } = (0, import_node_module.createRequire)(__DSH_IMPORT_META_URL)("../package.json"));',
+    `version = ${JSON.stringify(desktopManifest.version)};`,
+  )
+  await writeFile(destination, bundled)
 }
 
 /** Locate the host-native esbuild binary after pnpm has pruned root shims. */
