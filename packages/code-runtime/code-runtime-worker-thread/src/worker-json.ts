@@ -17,10 +17,12 @@ const intrinsicReflectApply = Reflect.get(Reflect, 'apply') as (
 const IntrinsicError = Error
 const IntrinsicSet = Set
 const intrinsicArrayIsArray = Array.isArray
+const intrinsicArrayConstructor = Array
 const intrinsicArrayPrototype = Array.prototype
 const intrinsicNumberIsFinite = Number.isFinite
 const intrinsicNumberIsSafeInteger = Number.isSafeInteger
 const intrinsicObjectCreate = Object.create
+const intrinsicObjectConstructor = Object
 const intrinsicObjectDefineProperty = Object.defineProperty
 const intrinsicObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor
 const intrinsicObjectGetPrototypeOf = Object.getPrototypeOf
@@ -87,7 +89,12 @@ function hasIntrinsicConstructor(prototype: object, name: 'Array' | 'Object'): b
   try {
     return constructor.name === name
       && constructor.prototype === prototype
-      && intrinsicReflectApply(intrinsicFunctionToString, constructor, []) === `function ${name}() { [native code] }`
+      && intrinsicReflectApply(intrinsicFunctionToString, constructor, [])
+        === intrinsicReflectApply(
+          intrinsicFunctionToString,
+          name === 'Object' ? intrinsicObjectConstructor : intrinsicArrayConstructor,
+          [],
+        )
   } catch {
     return false
   }

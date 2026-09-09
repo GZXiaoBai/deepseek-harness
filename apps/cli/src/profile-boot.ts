@@ -11,8 +11,8 @@
  * @module @deepseek-ai/dsh/profile-boot
  */
 
-import { writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { FiberState, type Context } from '@deepseek-ai/cordis'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
@@ -21,11 +21,14 @@ import {
   boot,
   composeEntries,
   healProfilesModuleFallback,
+  initProfile,
   installFailLoud,
   loadOptionalPatches,
   loadOverlayPatches,
   loadProfile,
   PROFILE_PATCH_FILENAME,
+  PROFILE_TEMPLATES,
+  resolveProfileDir,
   watchUserPatches,
   type Profile,
 } from '@deepseek-ai/dsh-app-boot'
@@ -87,6 +90,42 @@ const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tre
 /** Root config filename inside a profile directory. */
 export const PROFILE_ROOT_FILENAME = 'cordis.yml'
 
+/** Initialize a missing custom profile from one shipped template. */
+export function initializeProfileFromDefault(
+  name: string,
+  fromDefaultProfile: string,
+  home: string = resolveDshHome(),
+): void {
+  const dir = resolveProfileDir(name, home)
+  const template = Object.hasOwn(PROFILE_TEMPLATES, fromDefaultProfile)
+    ? PROFILE_TEMPLATES[fromDefaultProfile]
+    : undefined
+  if (template === undefined) {
+    const expected = Object.keys(PROFILE_TEMPLATES).sort().map(value => JSON.stringify(value)).join(', ')
+    throw new Error(`${NAME}: unknown default profile ${JSON.stringify(fromDefaultProfile)}; expected one of ${expected}`)
+  }
+  if (Object.hasOwn(PROFILE_TEMPLATES, name)) {
+    throw new Error(`${NAME}: profile ${JSON.stringify(name)} is shipped and cannot be a custom profile target`)
+  }
+  mkdirSync(dirname(dir), { recursive: true })
+  try {
+    mkdirSync(dir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    const manifestPath = join(dir, 'package.json')
+    if (existsSync(manifestPath)) throw new Error(`${NAME}: profile ${JSON.stringify(name)} already exists at ${manifestPath}`)
+    throw new Error(`${NAME}: profile directory ${dir} already exists; choose an unused profile name`)
+  }
+  try {
+    initProfile(dir, template.bundles, template.patchReload)
+  } catch (error) {
+    try { rmSync(dir, { recursive: true, force: true }) } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], `${NAME}: profile initialization failed and ${dir} could not be removed`)
+    }
+    throw error
+  }
+}
+
 /**
  * Resolve the telemetry opt-out switch into its boot patch. ANY non-empty
  * value (including `'0'`/`'false'`) disables: a privacy switch prefers
@@ -116,7 +155,8 @@ export function resolveTelemetryPatch(disabledEnv: string | undefined, hasRow: b
  * @param userLayer - `false` skips parsing `cordis.patch.yml` (the default dump).
  * @returns the loaded profile.
  */
-export function prepareProfile(name: string, userLayer = true): Profile {
+export function prepareProfile(name: string, userLayer = true, fromDefaultProfile?: string): Profile {
+  if (fromDefaultProfile !== undefined) initializeProfileFromDefault(name, fromDefaultProfile)
   const profile = loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
   writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
   return profile
@@ -165,8 +205,9 @@ async function composeProfile(
   shippedPresetRoot: string,
   bareModuleBaseUrl?: string,
   bareModulePackages: readonly string[] = [],
+  fromDefaultProfile?: string,
 ): Promise<ComposedProfile> {
-  const profile = prepareProfile(name)
+  const profile = prepareProfile(name, true, fromDefaultProfile)
   if (moduleFallback === 'links') {
     await healProfilesModuleFallback({ installAnchor: INSTALL_ANCHOR, profile })
   }
@@ -210,6 +251,8 @@ export interface RunProfileOptions {
   shippedPresetRoot?: string
   /** Host setup completed after Loader installation and before config entries mount. */
   prepareHost?: (ctx: Context) => Promise<void> | void
+  /** Shipped template used once to initialize a missing profile. */
+  fromDefaultProfile?: string | undefined
   /** `--patch` overlay paths, in argv order. */
   patchFiles: readonly string[]
   /** The invocation's inner arguments, handed to the tree through `ctx.cmdlineArgs`. */
@@ -255,6 +298,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     options.shippedPresetRoot ?? fileURLToPath(new URL('../config/agent-presets', import.meta.url)),
     options.bareModuleBaseUrl,
     options.bareModulePackages,
+    options.fromDefaultProfile,
   )
   const app: { current?: Context } = {}
   const appReady = createAppReady()

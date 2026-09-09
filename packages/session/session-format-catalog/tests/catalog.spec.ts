@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { sessionFormatCatalog } from '../src/index.ts'
 
 describe('first-party Session format catalog', () => {
-  it.each(['default', 'selection', 'inferred'])('preserves historical permission origin %s through v0 to v2', (origin) => {
+  it.each(['default', 'selection', 'inferred'])('preserves historical permission origin %s through v0 to v3', (origin) => {
     const header = { type: 'session', version: 0, id: 'historical-permission', createdAt: 1, delegationDepth: 0 }
     const rows = [{ type: 'permission/preset', seq: 0, time: 1, data: { preset: 'workspace-write', origin } }]
     const source = structuredClone(rows)
     const restore = sessionFormatCatalog.createRestore(header, { recovery: 'strict', validation: 'current' })
     for (const row of rows) restore.decodeRow(row)
     const migrated = restore.finish()
-    expect(migrated.header.version).toBe(2)
+    expect(migrated.header.version).toBe(3)
     expect(migrated.events).toEqual(source)
     expect(rows).toEqual(source)
     const encodedHeader = sessionFormatCatalog.encodeCurrentHeader(migrated.header, migrated.inheritedEventCount)
@@ -28,7 +28,7 @@ describe('first-party Session format catalog', () => {
     }).toThrow(/origin/)
   })
 
-  it('statically owns the complete adjacent v0 to v2 chain', () => {
+  it('statically owns the complete adjacent v0 to v3 chain', () => {
     const header = {
       type: 'session',
       version: 0,
@@ -38,13 +38,13 @@ describe('first-party Session format catalog', () => {
       delegationDepth: 0,
     }
 
-    expect(sessionFormatCatalog.currentVersion).toBe(2)
+    expect(sessionFormatCatalog.currentVersion).toBe(3)
     expect(sessionFormatCatalog.readHeader(header)).toEqual({
       status: 'migration-required',
       storedVersion: 0,
-      targetVersion: 2,
+      targetVersion: 3,
       header: {
-        version: 2,
+        version: 3,
         id: 'catalog',
         createdAt: 1,
         isSeeded: true,
@@ -58,13 +58,13 @@ describe('first-party Session format catalog', () => {
     })
     restore.decodeRow({ type: 'turn/start', seq: 0, time: 2, data: { turn: 1 } })
     expect(restore.finish()).toMatchObject({
-      header: { version: 2, id: 'catalog' },
+      header: { version: 3, id: 'catalog' },
     })
   })
 
   it('restores the installed current vocabulary without freezing ordinary payload additions', () => {
     const header = {
-      type: 'session', version: 2, id: 'current-growth', createdAt: 1, isSeeded: false, delegationDepth: 0,
+      type: 'session', version: 3, id: 'current-growth', createdAt: 1, isSeeded: false, delegationDepth: 0,
     }
     const restore = (rows: readonly unknown[]) => {
       const current = sessionFormatCatalog.createRestore(header, {

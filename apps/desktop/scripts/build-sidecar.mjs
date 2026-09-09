@@ -233,8 +233,12 @@ export async function buildDesktopSidecar() {
   })
   const verify = createSidecarVerifyCommand(REPOSITORY_ROOT, process.execPath)
   const pnpm = createPnpmCommand(process.env, process.execPath)
-  const nodeGypCli = repositoryRequire.resolve('node-gyp/bin/node-gyp.js')
   await run('verify runtime closure', verify.executable, verify.args)
+  await run(
+    'build host native system addon',
+    process.execPath,
+    [join(REPOSITORY_ROOT, 'node_modules/tsx/dist/cli.mjs'), 'native/system/scripts/build.ts', '--host-addon-only'],
+  )
   await rm(plan.stagingDirectory, { recursive: true, force: true })
   await run(
     'deploy sidecar closure',
@@ -244,7 +248,8 @@ export async function buildDesktopSidecar() {
   await restoreLegacyHoists(plan.stagingDirectory)
   await materializeStagedLinks(plan.stagingDirectory)
   await stageDesktopSidecarAssets(REPOSITORY_ROOT, plan.stagingDirectory)
-  await rebuildNativeAddons(plan.stagingDirectory, nodeGypCli)
+  await verifyNativeSystemAddon(plan.stagingDirectory, process.platform, process.arch)
+  await patchPackagedFlockModule(plan.stagingDirectory)
   await pruneNodePtyPrebuilds(plan.stagingDirectory, process.platform, process.arch)
   await pruneStagedRuntime(plan.stagingDirectory)
   await injectPkgConfig(plan.stagingDirectory)
@@ -314,21 +319,47 @@ async function materializeStagedLinks(stagingDirectory) {
   }
 }
 
-async function rebuildNativeAddons(stagingDirectory, nodeGypCli) {
+async function verifyNativeSystemAddon(stagingDirectory, platform, arch) {
+  if (platform === 'win32') return
   const runtimeRequire = createRequire(join(stagingDirectory, 'package.json'))
-  const fsExtManifest = runtimeRequire.resolve('fs-ext/package.json')
-  const command = createNativeAddonBuildCommand(
-    process.execPath,
-    nodeGypCli,
-    dirname(fsExtManifest),
-    SIDECAR_NODE_VERSION,
-  )
-  await run(
-    'rebuild Node 24 native addons',
-    command.executable,
-    command.args,
-    createNativeTargetEnvironment(process.env, SIDECAR_NODE_VERSION),
-  )
+  const packageName = `@deepseek-ai/node-addon-system-${platform}-${arch}`
+  const manifest = runtimeRequire.resolve(`${packageName}/package.json`)
+  const source = join(REPOSITORY_ROOT, 'native/system/packages', `${platform}-${arch}`, 'bin/system.node')
+  const destination = join(dirname(manifest), 'bin/system.node')
+  await mkdir(dirname(destination), { recursive: true })
+  await copyFile(source, destination)
+}
+
+/** Make the SEA-visible flock module use literal native paths that pkg can embed. */
+async function patchPackagedFlockModule(stagingDirectory) {
+  const file = join(stagingDirectory, 'node_modules/@deepseek-ai/node-addon-system/lib/flock.js')
+  const source = await readFile(file, 'utf8')
+  if (source.includes("require('../../node-addon-system-darwin-arm64/bin/system.node')")) return
+  const old = [
+    "    let filename = 'system.node';",
+    "    if (platform === 'linux') {",
+    "        // Node's report types omit the libc field supplied by Linux reports.",
+    "        const report = process.report.getReport();",
+    "        filename = join(report.header.glibcVersionRuntime ? 'glibc' : 'musl', filename);",
+    "    }",
+    "    const require = createRequire(import.meta.url);",
+    "    const manifest = require.resolve(`@deepseek-ai/node-addon-system-${platform}-${arch}/package.json`);",
+    "    binding = require(join(dirname(manifest), 'bin', filename));",
+  ].join('\n')
+  const replacement = [
+    "    const require = createRequire(import.meta.url);",
+    "    if (platform === 'darwin') {",
+    "        binding = require('../../node-addon-system-darwin-arm64/bin/system.node');",
+    "    } else {",
+    "        const report = process.report.getReport();",
+    "        const libc = report.header.glibcVersionRuntime ? 'glibc' : 'musl';",
+    "        binding = libc === 'glibc'",
+    "            ? require('../../node-addon-system-linux-x64/bin/glibc/system.node')",
+    "            : require('../../node-addon-system-linux-x64/bin/musl/system.node');",
+    "    }",
+  ].join('\n')
+  if (!source.includes(old)) throw new Error('Packaged flock module loader changed; update the SEA native-path rewrite')
+  await writeFile(file, source.replace(old, replacement))
 }
 
 async function findSymlink(directory) {

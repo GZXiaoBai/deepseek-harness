@@ -3,7 +3,7 @@
 import { fileURLToPath } from 'node:url'
 import { isSea } from 'node:sea'
 import { loadLayeredEnv } from '@deepseek-ai/dsh-app-boot'
-import { runProfile } from '@deepseek-ai/dsh/profile-boot'
+import type { runProfile as runProfileType } from '@deepseek-ai/dsh/profile-boot'
 import { DesktopSidecarChannel } from './sidecar-channel.ts'
 import { installDesktopSidecarChannel } from './sidecar-directory-picker.ts'
 import { formatSidecarError } from './sidecar-error.ts'
@@ -25,22 +25,32 @@ const packagedDependencies = isPackagedDesktopSidecar(
 )
   ? PACKAGED_DESKTOP_MODULES
   : ['@deepseek-ai/cordis', '@deepseek-ai/dsh-host-directory-picker']
+const resolverDependencies = packagedDependencies.filter(
+  packageName => !packageName.startsWith('@deepseek-ai/node-addon-system'),
+)
 const resolvePackagedSpecifier = createPackagedSpecifierResolver(
-  packagedDependencies,
+  resolverDependencies,
   specifier => import.meta.resolve(specifier),
 )
 const packagedPackageJson = createDesktopPackageJsonMappings(
-  [...packagedDependencies, '@deepseek-ai/dsh'],
+  [...resolverDependencies, '@deepseek-ai/dsh'],
   specifier => import.meta.resolve(specifier),
 )
 const shippedPresetRoot = resolveDesktopShippedPresetRoot(packagedPackageJson)
-const moduleHooks = installDesktopModuleResolver(createDesktopModuleMappings(
-  packagedDependencies,
-  specifier => import.meta.resolve(specifier),
-  new Map([[
+const additionalModuleMappings = new Map([
+  [
     '@deepseek-ai/dsh-desktop/sidecar-directory-picker',
     new URL('./sidecar-directory-picker.js', import.meta.url).href,
-  ]]),
+  ],
+])
+additionalModuleMappings.set(
+  '@deepseek-ai/node-addon-system/flock',
+  new URL('../../node-addon-system/lib/flock.js', import.meta.url).href,
+)
+const moduleHooks = installDesktopModuleResolver(createDesktopModuleMappings(
+  resolverDependencies,
+  specifier => import.meta.resolve(specifier),
+  additionalModuleMappings,
 ))
 
 const feasibilityIndex = process.argv.indexOf('--desktop-feasibility-probe')
@@ -62,7 +72,8 @@ if (feasibilityIndex >= 0) {
 }
 
 async function runDesktopSidecar(): Promise<void> {
-  let profileRun: ReturnType<typeof runProfile> | undefined
+  const { runProfile } = await import('@deepseek-ai/dsh/profile-boot')
+  let profileRun: ReturnType<typeof runProfileType> | undefined
   const channel = new DesktopSidecarChannel({
     input: process.stdin,
     output: process.stdout,
