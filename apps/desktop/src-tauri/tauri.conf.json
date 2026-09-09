@@ -39,6 +39,7 @@
   },
   "bundle": {
     "active": true,
+    "resources": ["resources/dsh-session-worker.cjs"],
     "externalBin": [
       "binaries/dsh-desktop-sidecar"
     ],

@@ -250,6 +250,7 @@ export async function buildDesktopSidecar() {
   await stageDesktopSidecarAssets(REPOSITORY_ROOT, plan.stagingDirectory)
   await verifyNativeSystemAddon(plan.stagingDirectory, process.platform, process.arch)
   await patchPackagedFlockModule(plan.stagingDirectory)
+  await stageSessionWorkerResource(plan.stagingDirectory, join(REPOSITORY_ROOT, 'apps/desktop'))
   await pruneNodePtyPrebuilds(plan.stagingDirectory, process.platform, process.arch)
   await pruneStagedRuntime(plan.stagingDirectory)
   await injectPkgConfig(plan.stagingDirectory)
@@ -360,6 +361,25 @@ async function patchPackagedFlockModule(stagingDirectory) {
   ].join('\n')
   if (!source.includes(old)) throw new Error('Packaged flock module loader changed; update the SEA native-path rewrite')
   await writeFile(file, source.replace(old, replacement))
+}
+
+/** Copy the persistence worker beside the native app so Worker Threads can load it outside the SEA VFS. */
+async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
+  const source = join(stagingDirectory, 'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/worker.cjs')
+  const destination = join(desktopRoot, 'src-tauri/resources/dsh-session-worker.cjs')
+  await mkdir(dirname(destination), { recursive: true })
+  await run(
+    'bundle session persistence worker',
+    join(REPOSITORY_ROOT, 'node_modules/.bin/esbuild'),
+    [
+      source,
+      '--bundle',
+      '--platform=node',
+      '--format=cjs',
+      '--outfile=' + destination,
+      '--external:node:*',
+    ],
+  )
 }
 
 async function findSymlink(directory) {

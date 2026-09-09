@@ -72,6 +72,10 @@ const verificationScheduler = new VerificationScheduler()
 
 function workerSpawn(request: VerificationRequest): { readonly entry: string | URL; readonly options: WorkerOptions } {
   /* v8 ignore next 3 -- built-worker coverage owns the bundled path. */
+  const packagedWorker = process.env.DSH_DESKTOP_SESSION_WORKER
+  if (packagedWorker !== undefined && packagedWorker !== '') {
+    return { entry: packagedWorker, options: { workerData: request, execArgv: [] } }
+  }
   if (!import.meta.url.endsWith('.ts')) {
     return {
       entry: new URL('./worker.cjs', import.meta.url),
