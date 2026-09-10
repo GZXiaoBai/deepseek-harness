@@ -1,10 +1,11 @@
 {
   "name": "@deepseek-ai/dsh-desktop-runtime",
   "description": "Private deploy root defining the standalone Desktop runtime closure",
-  "version": "0.1.5-alpha.1",
+  "version": "0.1.5-rc.1",
   "private": true,
   "type": "module",
   "dependencies": {
+    "@deepseek-ai/dsh-tool-present": "workspace:^",
     "@deepseek-ai/dsh-util-values": "workspace:^",
     "@deepseek-ai/node-addon-system": "workspace:^",
     "@deepseek-ai/cosmokit": "workspace:^",

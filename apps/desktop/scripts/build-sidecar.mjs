@@ -15,6 +15,7 @@ import {
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { verifySessionWorker } from './verify-session-worker.mjs'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 const repositoryRequire = createRequire(import.meta.url)
@@ -364,7 +365,7 @@ async function patchPackagedFlockModule(stagingDirectory) {
 }
 
 /** Copy the persistence worker beside the native app so Worker Threads can load it outside the SEA VFS. */
-async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
+export async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
   const source = join(stagingDirectory, 'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/worker.cjs')
   const destination = join(desktopRoot, 'src-tauri/resources/dsh-session-worker.cjs')
   await mkdir(dirname(destination), { recursive: true })
@@ -385,7 +386,12 @@ async function stageSessionWorkerResource(stagingDirectory, desktopRoot) {
     '({ version } = (0, import_node_module.createRequire)(__DSH_IMPORT_META_URL)("../package.json"));',
     `version = ${JSON.stringify(desktopManifest.version)};`,
   )
+  bundled = bundled.replace(
+    /\(0, node_module\.createRequire\)\(require\("url"\)\.pathToFileURL\(__filename\)\.href\)\("\.\.\/package\.json"\)/g,
+    JSON.stringify({ version: desktopManifest.version }),
+  )
   await writeFile(destination, bundled)
+  await verifySessionWorker(destination)
 }
 
 async function findSymlink(directory) {

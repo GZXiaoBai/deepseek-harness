@@ -16,7 +16,9 @@ Tauri 2 负责原生窗口、菜单、导航策略、单实例聚焦、窗口状
 
 版本化行协议在 stdout 使用 `DSH_DESKTOP/1 ` 前缀。JSON 事件报告启动阶段、就绪、致命错误、停止和原生目录对话框请求；stdin 传递 shutdown 与对话框结果。没有前缀的输出只作为插件日志，不能被识别为控制消息。sidecar 可执行源码被归类为由原生外壳持有的私有运行时，而不是另一个受支持的 Node 应用启动器。桌面 profile 使用 Tauri provider 替换 adaptive host picker，并显式保留负责渲染工作区操作、调用该 provider 的原生目录选择客户端模块。因此两个目标的目录选择都使用 Tauri 对话框，不再执行曾导致文件夹选择进程退出的 Koffi Win32 dialog worker。
 
-JSONL 持久化校验 worker 被打包成 SEA 旁边的独立 resource，因为 Node Worker Thread 不能从 SEA VFS 加载模块。sidecar 通过 `DSH_DESKTOP_SESSION_WORKER` 传入该 resource 路径；普通 Node 启动仍使用 package 自带的构建 worker 路径。
+JSONL 持久化校验 worker 被打包成 SEA 旁边的独立 resource，因为 Node Worker Thread 不能从 SEA VFS 加载模块。sidecar 通过 `DSH_DESKTOP_SESSION_WORKER` 传入该 resource 路径；普通 Node 启动仍使用 package 自带的构建 worker 路径。 worker 将包版本元数据内联；原生打包前，它在隔离临时目录中验证空的当前代际日志，并拒绝预期事件数量不符的输入。
+
+Windows 免安装负载复制与安装版相同的 worker 资源目录。安装包验收会拒绝缺少会话恢复 worker 的任一分发形式。
 
 Windows 先以挂起状态创建 sidecar，把它加入设置了 `KILL_ON_JOB_CLOSE` 的 Job Object，再恢复执行。macOS 为它分配独立 POSIX 进程组。在 Windows 上，主窗口关闭请求会保存窗口状态并隐藏窗口，由托盘图标继续持有应用；点击托盘图标或其中的 Show 项会恢复并聚焦窗口，Exit 项则开始关闭。macOS 窗口关闭与 Windows 托盘 Exit 都会发送 `shutdown`，等待 Harness dispose 与 `stopped`，并记录强制终止次数；只有超时才使用操作系统进程所有权兜底。桌面日志会轮转，性能数据记录进程启动、sidecar spawn、插件树就绪、HTTP 就绪、页面加载、关闭和强制终止。
 

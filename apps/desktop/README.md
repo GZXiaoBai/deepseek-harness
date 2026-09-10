@@ -13,6 +13,8 @@ This package builds the personal-use DeepSeek Harness desktop application with T
 | macOS 14+ on Apple Silicon | `apps/desktop/release-tauri/DeepSeek Harness.app` and `DeepSeek Harness-<version>-arm64.dmg` |
 | Windows 11 x64 | `apps/desktop/release-tauri/win-unpacked` and `DeepSeek Harness Setup <version>-x64.exe` |
 
+The unpacked Windows directory must retain its `resources/` folder, including the session recovery worker; copy the entire directory when moving the application.
+
 The sidecar embeds the Web backend, built-in plugins, and Web assets in its VFS. Target-specific `node-pty`, ripgrep, and process helpers remain ordinary sidecar files. The package contains no development TypeScript, source maps, tests, or documentation. A third-party plugin stays on disk below the user's Harness profile and may load its private dependencies while sharing the packaged Cordis and Harness Service Definition instances.
 
 ## Install and update

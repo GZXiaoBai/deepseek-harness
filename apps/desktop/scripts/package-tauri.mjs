@@ -145,6 +145,7 @@ async function collectArtifacts(plan) {
     await cp(join(nsisDirectory, installers[0]), join(plan.releaseDirectory, plan.installerName))
     const unpacked = join(plan.releaseDirectory, 'win-unpacked')
     await mkdir(unpacked, { recursive: true })
+    await cp(join(plan.desktopRoot, 'src-tauri/resources'), join(unpacked, 'resources'), { recursive: true })
     for (const name of [
       'deepseek-harness-desktop.exe',
       'dsh-desktop-sidecar.exe',

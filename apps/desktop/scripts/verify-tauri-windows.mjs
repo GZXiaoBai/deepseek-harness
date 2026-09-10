@@ -159,6 +159,7 @@ async function validateAppPayload(directory, executable, uninstaller) {
 }
 
 async function verifyLaunch(executable, cwd) {
+  await requireFile(join(dirname(executable), 'resources/dsh-session-worker.cjs'), 'Session recovery worker is missing')
   const root = await mkdtemp(join(tmpdir(), 'dsh-tauri-windows-launch-'))
   const userData = join(root, '用户 数据')
   await mkdir(userData, { recursive: true })
