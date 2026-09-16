@@ -2,6 +2,12 @@ import { Worker } from 'node:worker_threads'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import DirectoryPicker from '@deepseek-ai/dsh-host-directory-picker'
+import FileSystem from '@deepseek-ai/dsh-fs-local'
+import Subprocess from '@deepseek-ai/dsh-subprocess-local'
+import Sandbox from '@deepseek-ai/dsh-sandbox-local'
+import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
+import SessionProjections from '@deepseek-ai/dsh-session-projection'
+import NodePtcRuntime from '@deepseek-ai/dsh-ptc-runtime-node'
 
 /** Result emitted by the real SEA feasibility probe. */
 export interface DesktopSidecarFeasibilityResult {
@@ -9,6 +15,7 @@ export interface DesktopSidecarFeasibilityResult {
   workerThread: boolean
   koffi: boolean
   externalPlugin: boolean
+  ptcProcess: boolean
 }
 
 const WINDOWS_PTY_ENVIRONMENT_KEYS = [
@@ -50,13 +57,59 @@ export function appendPtyProbeOutput(
 export async function runDesktopSidecarFeasibilityProbe(
   externalPluginPath: string,
 ): Promise<DesktopSidecarFeasibilityResult> {
-  const [nodePty, workerThread, koffi, externalPlugin] = await Promise.all([
+  const [nodePty, workerThread, koffi, externalPlugin, ptcProcess] = await Promise.all([
     probeNodePty(),
     probeWorkerThread(),
     probeKoffi(),
     probeExternalPlugin(externalPluginPath),
+    probePtcProcess(),
   ])
-  return { nodePty, workerThread, koffi, externalPlugin }
+  return { nodePty, workerThread, koffi, externalPlugin, ptcProcess }
+}
+
+/**
+ * Executes a real TypeScript child with a host binding and waits for its disposal.
+ * @returns True after the child returns 42 and its process has exited.
+ */
+export async function probePtcProcess(): Promise<boolean> {
+  const ctx = new Context()
+  let childPid: number
+  try {
+    await ctx.plugin(SessionProjections)
+    await ctx.plugin(FileSystem)
+    await ctx.plugin(Subprocess)
+    await ctx.plugin(Sandbox, {})
+    await ctx.plugin(SandboxPolicy, { mode: 'read-only' })
+    await ctx.plugin(NodePtcRuntime, {})
+    const result = await ctx.ptcRuntime.run(ctx.ptcRuntime.resolve({
+      program: 'const answer: number = await tools.double(21); return { answer, pid: process.pid };',
+      timeoutMs: 10_000,
+      bindings: [{
+        global: 'tools',
+        functions: {
+          double: (value) => {
+            if (typeof value !== 'number') throw new Error('PTC probe binding requires a number')
+            return Promise.resolve(value * 2)
+          },
+        },
+      }],
+    }))
+    const value = result.value
+    if (result.error !== undefined || value === null || typeof value !== 'object' || Array.isArray(value)
+      || value.answer !== 42 || typeof value.pid !== 'number' || value.pid === process.pid) {
+      throw new Error(`Desktop PTC process probe failed: ${JSON.stringify(result)}`)
+    }
+    childPid = value.pid
+  } finally {
+    await ctx.fiber.dispose()
+  }
+  try {
+    process.kill(childPid, 0)
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return true
+    throw error
+  }
+  throw new Error(`Desktop PTC process probe left child ${childPid} running`)
 }
 
 async function probeNodePty(): Promise<boolean> {

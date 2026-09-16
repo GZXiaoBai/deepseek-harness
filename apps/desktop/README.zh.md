@@ -15,6 +15,8 @@
 
 移动 Windows 免安装版时须复制整个目录，保留包含会话恢复 worker 的 `resources/` 文件夹。
 
+Node PTC 程序和子进程辅助程序通过私有子入口选择器复用打包后端的可执行文件，不需要系统安装 Node，也不会启动第二个桌面后端。
+
 sidecar 把 Web 后端、内置插件和 Web 资源嵌入 VFS；目标平台专用的 `node-pty`、ripgrep 和进程辅助程序仍是普通 sidecar 文件。安装包不包含开发用 TypeScript、source map、测试或文档。第三方插件保留在用户 Harness profile 的磁盘目录中，可以加载自己的私有依赖，并共享打包后的 Cordis 与 Harness Service Definition 单例。
 
 ## 安装与更新

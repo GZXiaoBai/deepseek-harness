@@ -20,17 +20,21 @@ import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import {
   boot,
   composeEntries,
+  createProfileResolutionGeneration,
   healProfilesModuleFallback,
   initProfile,
   installFailLoud,
   loadOptionalPatches,
   loadOverlayPatches,
   loadProfile,
+  PluginPackages,
   PROFILE_PATCH_FILENAME,
   PROFILE_TEMPLATES,
   resolveProfileDir,
   watchUserPatches,
   type Profile,
+  type ProfileResolutionGeneration,
+  type ProfileResolutionMode,
 } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
@@ -165,6 +169,8 @@ export function prepareProfile(name: string, userLayer = true, fromDefaultProfil
 /** One profile's patch layers, in application order. */
 interface ComposedProfile {
   profile: Profile
+  /** Immutable package fallback selected before any plugin imports. */
+  resolution: ProfileResolutionGeneration
   /** Bundle layers concatenated — the part below the user layers on a live reload. */
   bundlePatches: PatchOptions[]
   /** The home-level user layer (`$DSH_HOME/cordis.patch.yml`), applied after the profile's own. */
@@ -192,25 +198,21 @@ function allPatches(composed: ComposedProfile): PatchOptions[] {
  * then the telemetry switch.
  * @param name - the profile name.
  * @param patchFiles - `--patch` overlay paths, in argv order.
- * @param moduleFallback - `resolver` skips filesystem links because the embedded host owns package resolution.
- * @param shippedPresetRoot - Built-in Agent preset directory supplied by the host.
- * @param bareModuleBaseUrl - Installed-host file URL used by an embedded resolver.
- * @param bareModulePackages - Package roots supplied by an embedded resolver.
+ * @param resolutionMode - Selects in-memory routing or materialized profile fallback.
+ * @param fromDefaultProfile - shipped template used once to initialize a missing profile.
  * @returns the profile and its patch layers.
  */
 async function composeProfile(
   name: string,
   patchFiles: readonly string[],
-  moduleFallback: 'links' | 'resolver',
-  shippedPresetRoot: string,
-  bareModuleBaseUrl?: string,
-  bareModulePackages: readonly string[] = [],
+  resolutionMode: ProfileResolutionMode,
   fromDefaultProfile?: string,
 ): Promise<ComposedProfile> {
   const profile = prepareProfile(name, true, fromDefaultProfile)
-  if (moduleFallback === 'links') {
-    await healProfilesModuleFallback({ installAnchor: INSTALL_ANCHOR, profile })
-  }
+  const resolutionOptions = { installAnchor: INSTALL_ANCHOR, profile }
+  const resolution = resolutionMode === 'runtime'
+    ? await createProfileResolutionGeneration(resolutionOptions)
+    : await healProfilesModuleFallback(resolutionOptions)
   const homePatches = loadOptionalPatches(NAME, homePatchPath()) ?? []
   const overlays = patchFiles.flatMap(file => loadOverlayPatches(NAME, resolve(file)))
   const bundlePatches = profile.layers.flatMap(layer => layer.patches)
@@ -219,20 +221,9 @@ async function composeProfile(
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const composedOverlays = [...overlays]
-  if (rows.has('agent-presets')) {
-    composedOverlays.push({
-      id: 'agent-presets',
-      config: {
-        ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-        roots: [{ path: shippedPresetRoot, trust: 'system' }],
-        ...(bareModuleBaseUrl === undefined ? {} : { harnessBase: bareModuleBaseUrl }),
-        ...(bareModulePackages.length === 0 ? {} : { resolvedPackages: [...bareModulePackages] }),
-      },
-    })
-  }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
   if (telemetryPatch !== undefined) composedOverlays.push(telemetryPatch)
-  return { profile, bundlePatches, homePatches, overlays: composedOverlays }
+  return { profile, resolution, bundlePatches, homePatches, overlays: composedOverlays }
 }
 
 /** Options for {@link runProfile}. */
@@ -247,7 +238,7 @@ export interface RunProfileOptions {
   bareModuleBaseUrl?: string
   /** Bare packages provided by the closed runtime's host resolver. */
   bareModulePackages?: readonly string[]
-  /** Host-resolved built-in Agent preset directory for a closed runtime. */
+  /** Embedded preset-root override; omitted by ordinary CLI launches. Other preset config fields remain reloadable. */
   shippedPresetRoot?: string
   /** Host setup completed after Loader installation and before config entries mount. */
   prepareHost?: (ctx: Context) => Promise<void> | void
@@ -257,6 +248,25 @@ export interface RunProfileOptions {
   patchFiles: readonly string[]
   /** The invocation's inner arguments, handed to the tree through `ctx.cmdlineArgs`. */
   args: readonly string[]
+  /** Module fallback backend; pkg executables always use runtime resolution. */
+  resolutionMode?: ProfileResolutionMode
+}
+
+/** Apply embedded-host paths to the current preset config, preserving reloadable user fields. */
+function withHostPresetOptions(patches: PatchOptions[], options: RunProfileOptions): PatchOptions[] {
+  if (options.shippedPresetRoot === undefined) return patches
+  const preset = composeEntries([patches]).find(row => row.id === 'agent-presets')
+  if (preset === undefined) return patches
+  return [...patches, {
+    id: 'agent-presets',
+    config: {
+      ...(preset.config ?? {}) as Record<string, unknown>,
+      roots: [{ path: options.shippedPresetRoot, trust: 'system' }],
+      ...(options.bareModuleBaseUrl === undefined ? {} : { harnessBase: options.bareModuleBaseUrl }),
+      ...options.bareModulePackages === undefined || options.bareModulePackages.length === 0
+        ? {} : { resolvedPackages: [...options.bareModulePackages] },
+    },
+  }]
 }
 
 /**
@@ -291,13 +301,12 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     (message) => { process.stderr.write(`${NAME}: ${message}\n`) },
   )
 
+  const packaged = (process as NodeJS.Process & { pkg?: unknown }).pkg !== undefined
+  const resolutionMode = packaged || options.moduleFallback === 'resolver' ? 'runtime' : options.resolutionMode ?? 'link'
   const composed = await composeProfile(
     options.profile,
     options.patchFiles,
-    options.moduleFallback ?? 'links',
-    options.shippedPresetRoot ?? fileURLToPath(new URL('../config/agent-presets', import.meta.url)),
-    options.bareModuleBaseUrl,
-    options.bareModulePackages,
+    resolutionMode,
     options.fromDefaultProfile,
   )
   const app: { current?: Context } = {}
@@ -335,19 +344,24 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   // objects in place. Reusing one parsed patch object across applications
   // would bake a user override into the bundle's in-memory insert row, so
   // removing the override could never revert the row to the bundle default.
-  const composeLive = (): PatchOptions[] => structuredClone([
+  const composeLive = (): PatchOptions[] => withHostPresetOptions(structuredClone([
     ...composed.bundlePatches,
     ...loadOptionalPatches(NAME, composed.profile.patchPath) ?? [],
     ...loadOptionalPatches(NAME, homePatchPath()) ?? [],
     ...composed.overlays,
-  ])
+  ]), options)
   // Cloned for the same insert-aliasing reason as composeLive: the boot
   // application must not mutate the objects later reloads recompose from.
-  const ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), async (hostCtx) => {
+  const initialPatches = withHostPresetOptions(structuredClone(allPatches(composed)), options)
+  const ctx = await boot(NAME, rootConfig, initialPatches, async (hostCtx) => {
     app.current = hostCtx
     // Before any config-tree entry mounts, so plugins resolve all launch-time
-    // environment values from the same immutable provenance snapshot.
+    // environment values from the same immutable launch snapshot.
     hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment)
+    await hostCtx.plugin(PluginPackages, resolutionMode === 'link' ? {} : {
+      generation: composed.resolution,
+      behavior: resolutionMode === 'dual' ? 'verify' : 'enforce',
+    })
     // The command line and bounded exit request are launcher facts available
     // to every app plugin that injects the argument snapshot.
     provideCmdline(hostCtx, {
@@ -356,7 +370,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       ready: appReady.service,
     })
     await options.prepareHost?.(hostCtx)
-  }, options.bareModuleBaseUrl)
+  }, options.bareModuleBaseUrl, options.bareModulePackages)
   app.current = ctx
   // A live-reload profile can dispose the whole tree while post-boot watcher
   // setup is in flight — a signal or appExit. Loader presence and fiber state
@@ -379,6 +393,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
           await ctx.loader.create({ name: '@deepseek-ai/cordis-plugin-timer' })
         }
         await ctx.loader.create({ name: '@deepseek-ai/cordis-plugin-hmr', config: { root: [] } })
+        await ctx.loader.await()
       }
       await watchUserPatches(ctx, {
         binName: NAME,

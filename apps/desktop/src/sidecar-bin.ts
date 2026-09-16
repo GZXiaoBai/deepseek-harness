@@ -16,6 +16,7 @@ import {
 } from './sidecar-module-resolver.ts'
 import { isPackagedDesktopSidecar, PACKAGED_DESKTOP_MODULES } from './sidecar-packaged-modules.ts'
 import { buildDesktopSidecarProfileOptions, desktopSidecarReadyEvents } from './sidecar-startup.ts'
+import { selectDesktopProcess } from './sidecar-process.ts'
 
 const startedAt = Date.now()
 const packagedDependencies = isPackagedDesktopSidecar(
@@ -54,7 +55,21 @@ const moduleHooks = installDesktopModuleResolver(createDesktopModuleMappings(
 ))
 
 const feasibilityIndex = process.argv.indexOf('--desktop-feasibility-probe')
-if (feasibilityIndex >= 0) {
+const aclRunner = process.platform === 'win32'
+  ? fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner'))
+  : undefined
+const selection = selectDesktopProcess(process.env, process.argv, aclRunner)
+if (selection.kind === 'acl') {
+  process.argv.splice(1, 1)
+  await import('@deepseek-ai/dsh-sandbox-windows-acl/runner')
+} else if (selection.kind === 'ptc') {
+  Reflect.deleteProperty(process.env, 'DSH_PTC_RUNTIME_NODE')
+  await import('@deepseek-ai/dsh-ptc-runtime-node/process')
+} else if (selection.kind === 'runner') {
+  Reflect.deleteProperty(process.env, 'DSH_SUBPROCESS_RUNNER')
+  const { runSelectedSubprocessRunner } = await import('@deepseek-ai/dsh-subprocess-local/runner')
+  await runSelectedSubprocessRunner(selection.selection)
+} else if (feasibilityIndex >= 0) {
   try {
     const externalPluginPath = process.argv[feasibilityIndex + 1]
     if (externalPluginPath === undefined) {

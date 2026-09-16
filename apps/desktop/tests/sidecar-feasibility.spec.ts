@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   appendPtyProbeOutput,
   createPtyProbeEnvironment,
+  probePtcProcess,
 } from '../src/sidecar-feasibility.ts'
 
 describe('desktop sidecar feasibility probe', () => {
+  it('executes a TypeScript binding in a real child process and joins it before success', async () => {
+    await expect(probePtcProcess()).resolves.toBe(true)
+  })
+
   it('supplies the Windows process environment needed by CreateProcessW without leaking unrelated values', () => {
     expect(createPtyProbeEnvironment('win32', {
       ComSpec: 'C:\\Windows\\System32\\cmd.exe',

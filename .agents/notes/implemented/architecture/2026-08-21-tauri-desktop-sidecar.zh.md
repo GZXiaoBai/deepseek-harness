@@ -20,6 +20,10 @@ JSONL 持久化校验 worker 被打包成 SEA 旁边的独立 resource，因为 
 
 Windows 免安装负载复制与安装版相同的 worker 资源目录。安装包验收会拒绝缺少会话恢复 worker 的任一分发形式。
 
+Node PTC 执行通过 `DSH_PTC_RUNTIME_NODE` 重新进入 SEA，本地子进程辅助程序使用 `DSH_SUBPROCESS_RUNNER`。这些子入口跳过桌面就绪协议，并保留 provider 继承的控制管道。Windows ACL 启动参数优先于 PTC 选择器，使隔离程序能够启动其嵌套子进程。profile 的 `PluginPackages` 服务接收内存中的解析代际，不创建指向 VFS 的文件系统回退链接。
+
+只有嵌入清单中的包名才相对于桌面宿主的 base URL 解析。其他裸插件名保留 profile 本地导入位置，preset 健康检查通过 `PluginPackages` 使用同一个 Loader base。桌面 preset 覆盖配置在每次重载时从当前 patch 栈重新计算，用户仍可修改默认 preset；未显式指定嵌入 preset 根目录的普通 CLI 启动不接受桌面覆盖配置。
+
 Windows 先以挂起状态创建 sidecar，把它加入设置了 `KILL_ON_JOB_CLOSE` 的 Job Object，再恢复执行。macOS 为它分配独立 POSIX 进程组。在 Windows 上，主窗口关闭请求会保存窗口状态并隐藏窗口，由托盘图标继续持有应用；点击托盘图标或其中的 Show 项会恢复并聚焦窗口，Exit 项则开始关闭。macOS 窗口关闭与 Windows 托盘 Exit 都会发送 `shutdown`，等待 Harness dispose 与 `stopped`，并记录强制终止次数；只有超时才使用操作系统进程所有权兜底。桌面日志会轮转，性能数据记录进程启动、sidecar spawn、插件树就绪、HTTP 就绪、页面加载、关闭和强制终止。
 
 自动更新检查只在第一个 Harness 页面完成加载后启动一次，避免外部网络延迟与受测启动路径争用资源。Harness 菜单中的手工更新检查仍可立即使用。

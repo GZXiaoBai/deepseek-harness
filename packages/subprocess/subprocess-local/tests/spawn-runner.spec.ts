@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, posix, resolve } from 'node:path'
+import { isSea } from 'node:sea'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Win32Error } from '@deepseek-ai/dsh-win32-process'
 import type {
@@ -50,11 +51,14 @@ import {
 } from '../src/spawn-runner.ts'
 import type { SpawnRunnerInternals } from '../src/spawn-runner.ts'
 
+vi.mock('node:sea', () => ({ isSea: vi.fn(() => false) }))
+
 const scratch: string[] = []
 
 afterEach(() => {
   for (const path of scratch.splice(0)) rmSync(path, { recursive: true, force: true })
   vi.restoreAllMocks()
+  vi.mocked(isSea).mockReturnValue(false)
 })
 
 function track<T extends { directory: string }>(files: T): T {
@@ -126,6 +130,17 @@ async function runWindows(
 }
 
 describe('closed runner protocol', () => {
+  it('preserves the explicit control request and rejects other transport values', () => {
+    const files = track(createLinuxLaunchFiles({ cwd: '/target', env: {}, control: 'pipe' }))
+    expect(consumeLinuxLaunchRequest(files.requestPath)).toEqual({ cwd: '/target', env: {}, control: 'pipe' })
+    expect(parseWindowsStartRequest({ type: 'start', cwd: 'C:\\target', env: {}, control: 'pipe' }))
+      .toEqual({ type: 'start', cwd: 'C:\\target', env: {}, control: 'pipe' })
+    const invalid = track(createLinuxLaunchFiles({ cwd: '/target', env: {} }))
+    writeFileSync(invalid.requestPath, JSON.stringify({ cwd: '/target', env: {}, control: 'ipc' }))
+    expect(() => consumeLinuxLaunchRequest(invalid.requestPath)).toThrow('invalid Linux launch request')
+    expect(() => parseWindowsStartRequest({ type: 'start', cwd: 'C:\\target', env: {}, control: 'ipc' })).toThrow()
+  })
+
   it('creates, consumes, reports through, and cleans one private Linux exchange', () => {
     const files = track(createLinuxLaunchFiles({ cwd: '/target', env: { A: '1' } }))
     if (process.platform !== 'win32') {
@@ -263,6 +278,9 @@ describe('runner launch inputs', () => {
     expect(parseRunnerTargetArgv(['--', 'node', 'a'])).toEqual(['node', 'a'])
     expect(() => parseRunnerTargetArgv(['node'])).toThrow('private -- delimiter')
     expect(runnerStdio(spec, false)).toEqual(['pipe', 'pipe', 'inherit'])
+    const withControl = { ...spec, stdio: { ...spec.stdio, control: 'pipe' as const } }
+    expect(runnerStdio(withControl, false)).toEqual(['pipe', 'pipe', 'inherit', 'ignore', 'ignore', 'ignore', 'ignore', 'overlapped'])
+    expect(runnerStdio(withControl, true)).toEqual(['ignore', 'ignore', 'ignore', 'ipc', 'pipe', 'pipe', 2, 'overlapped'])
     expect(runnerStdio(spec, true)).toEqual([
       'ignore', 'ignore', 'ignore', 'ipc', 'pipe', 'pipe', 2,
     ])
@@ -354,6 +372,13 @@ describe('runner launch inputs', () => {
     })
     expect(launched.status).toBe(127)
     expect(launched.stderr).not.toContain('ERR_MODULE_NOT_FOUND')
+  })
+
+  it('launches the private runner through the SEA executable without a virtual entry path', () => {
+    vi.mocked(isSea).mockReturnValue(true)
+    const invocation = spawnRunnerInvocation()
+    expect(invocation).toEqual([process.execPath])
+    expect(runnerEnvironment(WINDOWS_RUNNER_SELECTION, invocation).TSX_TSCONFIG_PATH).toBeUndefined()
   })
 
   it('serializes only the private protocol diagnostic fields', () => {
@@ -529,8 +554,8 @@ describe('Linux one-shot exec bootstrap', () => {
     })
   })
 
-  it('retries ENOEXEC through /bin/sh with the resolved file and original arguments', async () => {
-    const files = track(createLinuxLaunchFiles({ cwd: '/work', env: { PATH: 'bin' } }))
+  it.each([undefined, 'pipe'] as const)('retries ENOEXEC through /bin/sh with control %s', async (control) => {
+    const files = track(createLinuxLaunchFiles({ cwd: '/work', env: { PATH: 'bin' }, ...control === undefined ? {} : { control } }))
     const execve = vi.fn()
       .mockImplementationOnce(() => { throw Object.assign(new Error('exec format'), { code: 'ENOEXEC' }) })
       .mockImplementationOnce(() => { throw Object.assign(new Error('shell failed'), { code: 'EIO' }) })
@@ -541,8 +566,8 @@ describe('Linux one-shot exec bootstrap', () => {
       internals({ execve: execve as never }),
     )
     expect(execve.mock.calls).toEqual([
-      ['/work/bin/tool', ['tool', 'literal arg'], { PATH: 'bin' }],
-      ['/bin/sh', ['/bin/sh', '/work/bin/tool', 'literal arg'], { PATH: 'bin' }],
+      ['/work/bin/tool', ['tool', 'literal arg'], { PATH: 'bin' }, ...control === undefined ? [] : [control]],
+      ['/bin/sh', ['/bin/sh', '/work/bin/tool', 'literal arg'], { PATH: 'bin' }, ...control === undefined ? [] : [control]],
     ])
     expect(readLinuxStartupError(files.startupErrorPath)).toMatchObject({
       type: 'error', error: { code: 'EIO', path: 'tool' },
@@ -714,7 +739,7 @@ describe('Windows Job runner protocol owner', () => {
     expect(host.env).toEqual({ SAFE: 'bootstrap' })
   })
 
-  it('closes every target carrier before the first Windows poll', async () => {
+  it.each([undefined, 'pipe'] as const)('closes every target carrier with control %s before the first Windows poll', async (control) => {
     const events: string[] = []
     const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback: () => void) => {
       events.push('interval')
@@ -730,8 +755,8 @@ describe('Windows Job runner protocol owner', () => {
           return 0
         }),
       })
-      await runWindows(host, native)
-      expect(events).toEqual(['close:4', 'close:5', 'close:6', 'interval', 'poll'])
+      await runWindows(host, native, { type: 'start', cwd: 'C:\\target', env: {}, ...control === undefined ? {} : { control } })
+      expect(events).toEqual(['close:4', 'close:5', 'close:6', ...control === 'pipe' ? ['close:7'] : [], 'interval', 'poll'])
       expect(host.sent).toEqual([{ type: 'target-exit', exitCode: 0 }])
       expect(host.exitCode).toBe(0)
     } finally {

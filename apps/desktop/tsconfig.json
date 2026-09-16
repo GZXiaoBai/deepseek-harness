@@ -8,6 +8,13 @@
     "src"
   ],
   "references": [
+    { "path": "../../packages/ptc-runtime/ptc-runtime-node" },
+    { "path": "../../packages/subprocess/subprocess-local" },
+    { "path": "../../packages/sandbox/sandbox-windows-acl" },
+    { "path": "../../packages/sandbox/sandbox-local" },
+    { "path": "../../packages/sandbox/sandbox-policy" },
+    { "path": "../../packages/session/session-projection" },
+    { "path": "../../packages/fs/fs-local" },
     {
       "path": "../../vendor/cordis"
     },

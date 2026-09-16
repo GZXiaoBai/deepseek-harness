@@ -1,5 +1,11 @@
+import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
 import { describe, expect, it } from 'vitest'
 import { sessionFormatCatalog } from '../src/index.ts'
+import { currentSessionMessageProjections } from '../src/message-projections.ts'
+import { MESSAGE_PROJECTION_EVENT_TYPES } from '@deepseek-ai/dsh-session/src/known-event-types.ts'
+import { validateInstalledCurrentSessionArtifact } from '../src/current.ts'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 describe('first-party Session format catalog', () => {
   it.each(['default', 'selection', 'inferred'])('preserves historical permission origin %s through v0 to v3', (origin) => {
@@ -28,6 +34,17 @@ describe('first-party Session format catalog', () => {
     }).toThrow(/origin/)
   })
 
+  it('supplies every required current message interpreter and validates its durable references', () => {
+    expect(currentSessionMessageProjections.map(projection => projection.type).sort())
+      .toEqual([...MESSAGE_PROJECTION_EVENT_TYPES].sort())
+    const session = Session.create(SessionId('projection-catalog'))
+    session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'no image' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+    const artifact = {
+      header: { ...session.header, delegationDepth: 0 }, inheritedEventCount: 0,
+      events: [...session.snapshotEvents() as unknown as SessionFormatEvent[], { type: 'image/offload', seq: 1, time: 0, data: { targets: [{ seq: 0, imageIndexes: [0] }] } }],
+    }
+    expect(() => { validateInstalledCurrentSessionArtifact(artifact) }).toThrow(/image index 0 does not exist/)
+  })
   it('statically owns the complete adjacent v0 to v3 chain', () => {
     const header = {
       type: 'session',

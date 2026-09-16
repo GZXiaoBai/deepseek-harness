@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-09-08-ci-readiness-and-completion.md
-2026-09-08-ci-readiness-and-completion.md: fb129ff11f6634a16a916616a026964e8536f233
-2026-09-08-ci-readiness-and-completion.zh.md: 218bae4bbaf17c1e0937a0eb5d1f3410e7344556
+2026-09-08-ci-readiness-and-completion.md: c1b457d7570c09bcd99694449e887974aaf0fea7
+2026-09-08-ci-readiness-and-completion.zh.md: 70e8d262f36a978e0a1da340faa6882587cbb528

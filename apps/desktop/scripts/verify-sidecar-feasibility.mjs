@@ -82,7 +82,7 @@ export async function verifyDesktopSidecarFeasibility(input = {}) {
       ? createNativeSidecarBuildPath(plan.outputPath, plan.rustTarget, 'spawn-helper', false)
       : undefined
     const result = await runProbe(plan.outputPath, join(fixture, 'index.mjs'), helperPath)
-    for (const capability of ['nodePty', 'workerThread', 'koffi', 'externalPlugin']) {
+    for (const capability of ['nodePty', 'workerThread', 'koffi', 'externalPlugin', 'ptcProcess']) {
       if (result[capability] !== true) {
         throw new Error(`Desktop sidecar feasibility failed: ${capability}`)
       }

@@ -17,6 +17,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include, { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import { PluginPackages } from '@deepseek-ai/dsh-app-boot'
 import * as yaml from 'js-yaml'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import AgentPresets, { SHIPPED_PRESET_ROOT, type Config } from '@deepseek-ai/dsh-agent-presets'
@@ -40,9 +41,9 @@ afterEach(async () => {
 })
 
 /** Boot a roster with the shipped root left to the plugin's default. */
-async function roster(config: Partial<Config> = {}): Promise<Context> {
+async function roster(config: Partial<Config> = {}, baseUrl = pathToFileURL(FIXTURES).href + '/'): Promise<Context> {
   const ctx = new Context()
-  ctx.baseUrl = pathToFileURL(FIXTURES).href + '/'
+  ctx.baseUrl = baseUrl
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   await ctx.plugin(SessionProjectionRegistry)
@@ -173,6 +174,34 @@ describe('the shipped preset root', () => {
     expect(embedded?.broken).toBeUndefined()
   })
 
+  it('checks profile-installed plugins through the runtime service despite an embedded harness base', async () => {
+    const profilesDir = join(home, 'profiles')
+    const profileDir = join(profilesDir, 'desktop')
+    const pluginDir = join(profileDir, 'node_modules', 'local-preset-plugin')
+    const presetRoot = join(home, 'presets')
+    await mkdir(pluginDir, { recursive: true })
+    await writeFile(join(pluginDir, 'package.json'), JSON.stringify({ name: 'local-preset-plugin' }))
+    await mkdir(join(presetRoot, 'local'), { recursive: true })
+    await writeFile(join(presetRoot, 'local', 'agent.cordis.yml'), '- name: local-preset-plugin\n')
+    const ctx = await roster({
+      default: 'local', includeShippedRoot: false, includeUserRoot: false,
+      roots: [{ path: presetRoot, trust: 'user' }],
+      harnessBase: pathToFileURL(join(home, 'embedded', 'entry.js')).href,
+      resolvedPackages: ['embedded-package'],
+    }, pathToFileURL(profileDir).href + '/')
+    try {
+      await ctx.plugin(PluginPackages, {
+        generation: { profilesDir, profileDir, localPackageNames: ['local-preset-plugin'], entries: [] },
+      })
+
+      const [local] = await ctx.agentPresets.list()
+      expect(local).toMatchObject({ id: 'local' })
+      expect(local?.broken).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('enables web_fetch in each tool-bearing Web app preset', async () => {
     for (const id of ['cordis', 'ptc', 'standard']) {
       const entries = await shippedEntries(id)
@@ -186,14 +215,22 @@ describe('the shipped preset root', () => {
     }
   })
 
-  it('omits the general workflow tool only from PTC while retaining Ralph infrastructure', async () => {
+  it('omits the general workflow tool and its unused engine only from PTC', async () => {
     const ptc = await shippedEntries('ptc')
     expect(findEntry(ptc, 'tool-workflow')?.disabled).toBe(true)
-    expect(findEntry(ptc, 'workflow-worker-thread')?.disabled).not.toBe(true)
-    expect(findEntry(ptc, 'tool-ralph')?.disabled).not.toBe(true)
+    expect(findEntry(ptc, 'workflow-ptc')?.disabled).toBe(true)
 
     for (const id of ['standard', 'cordis']) {
-      expect(findEntry(await shippedEntries(id), 'tool-workflow')?.disabled, id).not.toBe(true)
+      const entries = await shippedEntries(id)
+      expect(findEntry(entries, 'tool-workflow')?.disabled, id).not.toBe(true)
+      expect(findEntry(entries, 'workflow-ptc')?.disabled, id).not.toBe(true)
     }
+  })
+
+  it('disables the ralph tool in every shipped preset that carries it', async () => {
+    for (const id of ['cordis', 'ptc', 'standard']) {
+      expect(findEntry(await shippedEntries(id), 'tool-ralph')?.disabled, id).toBe(true)
+    }
+    expect(findEntry(await shippedEntries('minimal'), 'tool-ralph')).toBeUndefined()
   })
 })

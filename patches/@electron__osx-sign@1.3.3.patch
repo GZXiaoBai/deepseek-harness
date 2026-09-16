@@ -48,6 +48,15 @@ index 77e64b56872bc65bcb0f60ecfbec84eb3da02c6f..cbee263b90bae56e6c047b1404572ec5
  }
  /**
   * This function returns a promise validating opts.app, the application to be signed or flattened.
+@@ -153,7 +153,7 @@ async function walkAsync(dirPath) {
+         const children = await fs.readdir(dirPath);
+         return await Promise.all(children.map(async (child) => {
+             const filePath = path.resolve(dirPath, child);
+-            const stat = await fs.stat(filePath);
++            const stat = await fs.lstat(filePath);
+             if (stat.isFile()) {
+                 switch (path.extname(filePath)) {
+                     case '.cstemp': // Temporary file generated from past codesign
 diff --git a/dist/esm/util.js b/dist/esm/util.js
 index d3f66d54b1a88e7410d78affe17de87302db02a3..28ce0fdf5b5ed859035a138fa1111712f4cc164f 100644
 --- a/dist/esm/util.js
@@ -98,3 +107,12 @@ index d3f66d54b1a88e7410d78affe17de87302db02a3..28ce0fdf5b5ed859035a138fa1111712
  }
  /**
   * This function returns a promise validating opts.app, the application to be signed or flattened.
+@@ -117,7 +117,7 @@ export async function walkAsync(dirPath) {
+         const children = await fs.readdir(dirPath);
+         return await Promise.all(children.map(async (child) => {
+             const filePath = path.resolve(dirPath, child);
+-            const stat = await fs.stat(filePath);
++            const stat = await fs.lstat(filePath);
+             if (stat.isFile()) {
+                 switch (path.extname(filePath)) {
+                     case '.cstemp': // Temporary file generated from past codesign

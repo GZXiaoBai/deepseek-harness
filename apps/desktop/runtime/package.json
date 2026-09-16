@@ -1,10 +1,11 @@
 {
   "name": "@deepseek-ai/dsh-desktop-runtime",
   "description": "Private deploy root defining the standalone Desktop runtime closure",
-  "version": "0.1.5-rc.2",
+  "version": "0.1.6-alpha.1",
   "private": true,
   "type": "module",
   "dependencies": {
+    "@deepseek-ai/dsh-compaction-image-offload": "workspace:^",
     "@deepseek-ai/dsh-tool-present": "workspace:^",
     "@deepseek-ai/dsh-util-values": "workspace:^",
     "@deepseek-ai/node-addon-system": "workspace:^",
@@ -51,7 +52,7 @@
     "@deepseek-ai/dsh-client-ui-tool": "workspace:^",
     "@deepseek-ai/dsh-client-ui-trajectory": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workspace": "workspace:^",
-    "@deepseek-ai/dsh-code-runtime": "workspace:^",
+    "@deepseek-ai/dsh-ptc-runtime": "workspace:^",
     "@deepseek-ai/dsh-command-feedback": "workspace:^",
     "@deepseek-ai/dsh-command-goal": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
@@ -147,6 +148,6 @@
     "@deepseek-ai/dsh-tool-subagent": "workspace:^",
     "@deepseek-ai/dsh-tool-subagent-control": "workspace:^",
     "@deepseek-ai/dsh-tool-web": "workspace:^",
-    "@deepseek-ai/dsh-workflow-worker-thread": "workspace:^"
+    "@deepseek-ai/dsh-workflow-ptc": "workspace:^"
   }
 }

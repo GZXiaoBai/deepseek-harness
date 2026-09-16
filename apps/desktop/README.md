@@ -15,6 +15,8 @@ This package builds the personal-use DeepSeek Harness desktop application with T
 
 The unpacked Windows directory must retain its `resources/` folder, including the session recovery worker; copy the entire directory when moving the application.
 
+Node PTC programs and subprocess helpers reuse the packaged backend executable through private child-entry selectors. They do not require a system Node installation or start another desktop backend.
+
 The sidecar embeds the Web backend, built-in plugins, and Web assets in its VFS. Target-specific `node-pty`, ripgrep, and process helpers remain ordinary sidecar files. The package contains no development TypeScript, source maps, tests, or documentation. A third-party plugin stays on disk below the user's Harness profile and may load its private dependencies while sharing the packaged Cordis and Harness Service Definition instances.
 
 ## Install and update
