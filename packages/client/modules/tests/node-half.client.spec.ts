@@ -758,6 +758,58 @@ describe('client bundle activation', () => {
     expect(consumer.findEntry(3, 0)).toMatchObject({ originalSource: '/packages/demo/second.ts' })
   })
 
+  it.each([
+    { label: 'Unicode', source: "window.text = '中文😀e\u0301𐐷'\n", mappings: 'AAAA', nextLine: 2 },
+    { label: 'CRLF', source: 'window.first = true\r\nwindow.second = true\r\n', mappings: 'AAAA;AACA', nextLine: 3 },
+    { label: 'consecutive empty lines', source: '\n\nwindow.middle = true\n\n\n', mappings: 'AAAA;AACA;AACA;AACA;AACA', nextLine: 6 },
+  ])('preserves combo bytes and source-map offsets with $label', async ({ source, mappings, nextLine }) => {
+    const firstName = '@fixture/newline-first'
+    const secondName = '@fixture/newline-second'
+    const firstPath = writePackage(firstName)
+    const secondPath = writePackage(secondName)
+    mkdirSync(dirname(firstPath), { recursive: true })
+    mkdirSync(dirname(secondPath), { recursive: true })
+    writeFileSync(firstPath, source)
+    writeFileSync(secondPath, 'window.following = true\n')
+    writeFileSync(`${secondPath}.map`, JSON.stringify({
+      version: 3, names: [], mappings: 'AAAA', sources: ['/authored/following.ts'],
+      sourcesContent: ['export {}\n'],
+    }))
+
+    const { service, route } = constructWithRoute([firstName, secondName])
+    const batch = service.graph().batches[0]!
+    const script = await routeRequest(route, batch.url)
+    expect(script.body).toEqual(Buffer.from(
+      `${source};\nwindow.following = true\n;\n//# sourceMappingURL=${mapUrl(batch.url)}\n`,
+    ))
+    const payload = JSON.parse((await routeRequest(route, mapUrl(batch.url))).body.toString('utf8')) as {
+      sections: { offset: { line: number; column: number }; map: Record<string, unknown> }[]
+    }
+    expect(payload.sections).toEqual([
+      {
+        offset: { line: 0, column: 0 },
+        map: {
+          version: 3, names: [], sources: [`/plugins/${firstName}/client.js`],
+          sourcesContent: [source], mappings,
+        },
+      },
+      {
+        offset: { line: nextLine, column: 0 },
+        map: {
+          version: 3, names: [], mappings: 'AAAA', sources: ['/authored/following.ts'],
+          sourcesContent: ['export {}\n'],
+        },
+      },
+    ])
+    const consumer = new SourceMap(payload as unknown as ConstructorParameters<typeof SourceMap>[0])
+    expect(consumer.findEntry(nextLine - 2, 0)).toMatchObject({
+      originalSource: `/plugins/${firstName}/client.js`, originalLine: nextLine - 2,
+    })
+    expect(consumer.findEntry(nextLine, 0)).toMatchObject({
+      originalSource: '/authored/following.ts', originalLine: 0,
+    })
+  })
+
   it('combines a generated-file fallback with a later authored map', async () => {
     const unmappedName = '@fixture/unmapped-first'
     const mappedName = '@fixture/mapped-second'
