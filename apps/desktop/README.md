@@ -27,6 +27,10 @@ On Windows, run `DeepSeek Harness Setup <version>-x64.exe`. The one-click NSIS i
 
 The Harness menu can check for updates or toggle automatic checks. A release publishes the NSIS installer, macOS updater archive, `.sig` files, `latest.json`, DMG, and SHA-256 files. Tauri verifies every update with the public key embedded in `tauri.conf.json`; the signing private key exists only in release secrets. An unsigned or modified update is rejected independently of operating-system code signing.
 
+## Windows EV signing
+
+This personal build ships unsigned: `DeepSeek Harness Setup <version>-x64.exe` carries no Authenticode certificate, so SmartScreen may warn until the file gains reputation. An EV certificate becomes required only before distributing the installer outside this repository, and adding one changes the signing step alone; the packaged layout and the SHA-256 sums published beside it stay identical. Verify those sums before running an installer whose signature is absent.
+
 ## Data and logs
 
 The application reuses the existing data locations:

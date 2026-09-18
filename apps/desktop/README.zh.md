@@ -27,6 +27,10 @@ sidecar 把 Web 后端、内置插件和 Web 资源嵌入 VFS；目标平台专�
 
 Harness 菜单可以手工检查更新或切换自动检查。Release 会发布 NSIS 安装程序、macOS 更新归档、`.sig` 文件、`latest.json`、DMG 与 SHA-256 文件。Tauri 使用 `tauri.conf.json` 中的公钥验证每个更新，签名私钥只存在于发布密钥中。未签名或被修改的更新会被拒绝，这项校验独立于操作系统代码签名。
 
+## Windows EV 签名
+
+本个人构建保持未签名：`DeepSeek Harness Setup <version>-x64.exe` 不含 Authenticode 证书，因此 SmartScreen 在文件建立信誉前可能警告。只有把安装程序分发到本仓库之外时，EV 证书才成为必需；加入证书只改变签名步骤，打包布局与随包发布的 SHA-256 校验值保持不变。运行没有签名的安装程序之前，请先核对校验值。
+
 ## 数据与日志
 
 应用继续使用原有数据位置：

@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import type { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { initProfile, PROFILE_PATCH_FILENAME, resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
+import { initProfile, composeEntries, PROFILE_PATCH_FILENAME, readProfilePatches, resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runProfile } from '../src/profile-boot.ts'
@@ -50,7 +50,7 @@ function writePresetPatch(defaultId: string, roots: { path: string; trust: strin
 
 describe('profile preset configuration', () => {
   it('preserves configured preset roots in an ordinary CLI launch', async () => {
-    initProfile(resolveProfileDir('preset-config', home), [], 'startup')
+    initProfile(resolveProfileDir('preset-config', home), [])
     const roots = [{ path: join(home, 'custom-presets'), trust: 'user' }]
     const record = writePresetPatch('custom', roots)
 
@@ -62,8 +62,8 @@ describe('profile preset configuration', () => {
     expect(JSON.parse(readFileSync(record, 'utf8'))).toMatchObject({ default: 'custom', roots })
   })
 
-  it('retains embedded paths while reloading the latest preset configuration', async () => {
-    initProfile(resolveProfileDir('preset-config', home), [], 'live')
+  it('retains embedded paths when the profile patches are recomposed', async () => {
+    initProfile(resolveProfileDir('preset-config', home), [])
     const record = writePresetPatch('first', [])
     const shippedPresetRoot = join(home, 'embedded-presets')
     const bareModuleBaseUrl = new URL('./fixtures/', import.meta.url).href
@@ -80,14 +80,14 @@ describe('profile preset configuration', () => {
     expect(JSON.parse(readFileSync(record, 'utf8'))).toMatchObject({ default: 'first', ...embedded })
 
     writePresetPatch('second', [{ path: join(home, 'user-presets'), trust: 'user' }])
-
-    await expect.poll((): unknown => JSON.parse(readFileSync(record, 'utf8')), { timeout: 5_000 })
+    const recomposed = readProfilePatches('dsh', run.ctx.profileContext)
+    expect(composeEntries([recomposed]).find(row => row.id === 'agent-presets')?.config)
       .toMatchObject({ default: 'second', ...embedded })
-  }, 10_000)
+  })
 
   it('loads a profile-installed bare plugin while the host supplies embedded packages', async () => {
     const profileDir = resolveProfileDir('preset-config', home)
-    initProfile(profileDir, [], 'startup')
+    initProfile(profileDir, [])
     const pluginDir = join(profileDir, 'node_modules', 'external-preset-recorder')
     mkdirSync(pluginDir, { recursive: true })
     writeFileSync(join(pluginDir, 'package.json'), JSON.stringify({
