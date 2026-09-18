@@ -1585,6 +1585,21 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Launch-time DSH_TELEMETRY_DISABLED value; any non-empty value opts out.',
         parameters: [],
       },
+      {
+        signature: 'readonly shippedPresetRoot?: string',
+        description: 'Embedded preset root; omitted by ordinary CLI launches, which keep the profile\'s own roots.',
+        parameters: [],
+      },
+      {
+        signature: 'readonly bareModuleBaseUrl?: string',
+        description: 'Host-owned base URL used to resolve bare packages in a closed runtime.',
+        parameters: [],
+      },
+      {
+        signature: 'readonly bareModulePackages?: readonly string[]',
+        description: 'Bare packages provided by the closed runtime\'s host resolver.',
+        parameters: [],
+      },
     ],
   },
   {
