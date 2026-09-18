@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -42,11 +42,12 @@ async function stagedEngine(files: Record<string, string>): Promise<string> {
 
 describe('staged office engine verification', () => {
   it('resolves the engine package of each supported target', () => {
-    expect(engine.stagedEngineDirectory('/app/resources/libreoffice', 'darwin', 'arm64'))
-      .toBe('/app/resources/libreoffice/node_modules/@deepseek-ai/libreoffice-kit-darwin-arm64')
-    expect(engine.stagedEngineDirectory('/app/resources/libreoffice', 'win32', 'x64'))
-      .toBe('/app/resources/libreoffice/node_modules/@deepseek-ai/libreoffice-kit-win32-x64')
-    expect(() => engine.stagedEngineDirectory('/app/resources/libreoffice', 'linux', 'x64'))
+    const resources = join(parse(process.cwd()).root, 'app', 'resources', 'libreoffice')
+    expect(engine.stagedEngineDirectory(resources, 'darwin', 'arm64'))
+      .toBe(join(resources, 'node_modules', '@deepseek-ai', 'libreoffice-kit-darwin-arm64'))
+    expect(engine.stagedEngineDirectory(resources, 'win32', 'x64'))
+      .toBe(join(resources, 'node_modules', '@deepseek-ai', 'libreoffice-kit-win32-x64'))
+    expect(() => engine.stagedEngineDirectory(resources, 'linux', 'x64'))
       .toThrow('Unsupported office engine target: linux-x64')
   })
 
