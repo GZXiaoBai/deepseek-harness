@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { FiberState, type Context } from '@deepseek-ai/cordis'
+import type { Context, FiberState } from '@deepseek-ai/cordis'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import {
   boot,
@@ -39,6 +39,13 @@ import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
 import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
+
+/**
+ * Value mirror of Cordis's `FiberState` const enum: the desktop sidecar bundle cannot inline a
+ * const enum declared by an external package, and the artifact-plane `@deepseek-ai/cordis`
+ * exposes no runtime object (same rationale as `packages/boot/app-boot/src/index.ts`).
+ */
+const FIBER_ACTIVE = 2 as FiberState.ACTIVE
 
 const NAME = 'dsh'
 
@@ -339,7 +346,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     }, options.bareModuleBaseUrl, options.bareModulePackages)
     app.current = ctx
     if (!signalShutdown.signal.aborted
-      && ctx.fiber.state === FiberState.ACTIVE
+      && ctx.fiber.state === FIBER_ACTIVE
       && ctx.get('loader') !== undefined) {
       appReady.commit()
     }

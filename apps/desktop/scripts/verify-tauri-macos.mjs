@@ -12,8 +12,9 @@ export {
 } from './harness-boot-audit.mjs'
 
 const DESKTOP_ROOT = fileURLToPath(new URL('..', import.meta.url))
-const MAX_APP_FILES = 500
-const MAX_APP_BYTES = 250 * 1024 * 1024
+// The packaged office engine ships as ordinary resources: about 2,000 files and 260 MB per platform.
+const MAX_APP_FILES = 8_000
+const MAX_APP_BYTES = 900 * 1024 * 1024
 const MAX_PAGE_LOAD_MS = 10_000
 const STARTUP_TIMEOUT_MS = 20_000
 const SMOKE_EXIT_AFTER_READY_MS = 6_000

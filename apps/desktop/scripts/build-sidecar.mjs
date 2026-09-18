@@ -15,6 +15,7 @@ import {
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pruneLibreOfficeStagedPackages, stageLibreOfficeKit } from './stage-libreoffice-kit.mjs'
 import { verifySessionWorker } from './verify-session-worker.mjs'
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -253,6 +254,15 @@ export async function buildDesktopSidecar() {
   await patchPackagedFlockModule(plan.stagingDirectory)
   await stageSessionWorkerResource(plan.stagingDirectory, join(REPOSITORY_ROOT, 'apps/desktop'))
   await pruneNodePtyPrebuilds(plan.stagingDirectory, process.platform, process.arch)
+  // The office engine runs as a real process, so it ships beside the executable
+  // instead of inside the embedded runtime filesystem.
+  const officeKit = await stageLibreOfficeKit({
+    stagedRoot: plan.stagingDirectory,
+    platform: process.platform,
+    arch: process.arch,
+  })
+  console.log(`desktop office kit: ${officeKit.resourcesDirectory}`)
+  await pruneLibreOfficeStagedPackages(plan.stagingDirectory, process.platform, process.arch)
   await pruneStagedRuntime(plan.stagingDirectory)
   await injectPkgConfig(plan.stagingDirectory)
   await mkdir(dirname(plan.outputPath), { recursive: true })

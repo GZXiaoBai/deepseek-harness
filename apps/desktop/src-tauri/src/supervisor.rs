@@ -133,16 +133,18 @@ impl DesktopRuntime {
 
     pub fn start(&self, app: AppHandle) -> Result<(), String> {
         let executable = sidecar_executable()?;
-        let session_worker = app
+        let resources = app
             .path()
             .resource_dir()
-            .map_err(|error| format!("failed to resolve app resource directory: {error}"))?
-            .join("resources/dsh-session-worker.cjs");
+            .map_err(|error| format!("failed to resolve app resource directory: {error}"))?;
+        let session_worker = resources.join("resources/dsh-session-worker.cjs");
+        let real_packages = resources.join("resources/libreoffice");
         let mut command = Command::new(&executable);
         command
             .current_dir(dirs::home_dir().unwrap_or_else(|| self.user_data.clone()))
             .env("DSH_HOME", self.user_data.join("Harness"))
             .env("DSH_DESKTOP_SESSION_WORKER", session_worker)
+            .env("DSH_DESKTOP_REAL_PACKAGES_ROOT", real_packages)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

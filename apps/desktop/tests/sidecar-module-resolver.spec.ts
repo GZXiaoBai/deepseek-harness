@@ -96,4 +96,43 @@ describe('desktop sidecar module resolver', () => {
       ['@deepseek-ai/cordis/', 'file:///snapshot/cordis.js'],
     ]))).toThrow('exact package specifier')
   })
+
+  it('serves a real-filesystem package entry and its subpaths ahead of the embedded runtime', () => {
+    const resolve = createDesktopModuleResolveHook(new Map(), new Map([
+      ['@deepseek-ai/libreoffice-kit', {
+        entry: 'file:///Applications/Harness.app/Contents/Resources/resources/libreoffice/node_modules/@deepseek-ai/libreoffice-kit/lib/index.js',
+        directory: 'file:///Applications/Harness.app/Contents/Resources/resources/libreoffice/node_modules/@deepseek-ai/libreoffice-kit/',
+      }],
+    ]))
+    const context = {
+      conditions: [],
+      importAttributes: {},
+      parentURL: 'file:///snapshot/runtime/office-to-pdf.js',
+    }
+    const nextResolve = (specifier: string): { url: string } => ({ url: new URL(specifier, context.parentURL).href })
+
+    expect(resolve('@deepseek-ai/libreoffice-kit', context, nextResolve)).toEqual({
+      url: 'file:///Applications/Harness.app/Contents/Resources/resources/libreoffice/node_modules/@deepseek-ai/libreoffice-kit/lib/index.js',
+      shortCircuit: true,
+    })
+    expect(resolve('@deepseek-ai/libreoffice-kit/worker', context, nextResolve)).toEqual({
+      url: 'file:///Applications/Harness.app/Contents/Resources/resources/libreoffice/node_modules/@deepseek-ai/libreoffice-kit/worker',
+      shortCircuit: true,
+    })
+    expect(resolve('@deepseek-ai/libreoffice-kit-not-installed', context, nextResolve)).toEqual({
+      url: 'file:///snapshot/runtime/@deepseek-ai/libreoffice-kit-not-installed',
+    })
+  })
+
+  it('rejects malformed real package mappings before installing a process hook', () => {
+    expect(() => createDesktopModuleResolveHook(new Map(), new Map([
+      ['@deepseek-ai/libreoffice-kit', { entry: 'file:///real/lib/index.js', directory: 'file:///real/lib' }],
+    ]))).toThrow('absolute directory URL')
+    expect(() => createDesktopModuleResolveHook(new Map(), new Map([
+      ['@deepseek-ai/libreoffice-kit', { entry: 'https://example.com/index.js', directory: 'file:///real/' }],
+    ]))).toThrow('absolute file URL')
+    expect(() => createDesktopModuleResolveHook(new Map(), new Map([
+      ['@deepseek-ai/libreoffice-kit/', { entry: 'file:///real/index.js', directory: 'file:///real/' }],
+    ]))).toThrow('exact package name')
+  })
 })

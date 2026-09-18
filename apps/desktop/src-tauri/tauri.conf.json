@@ -39,7 +39,10 @@
   },
   "bundle": {
     "active": true,
-    "resources": ["resources/dsh-session-worker.cjs"],
+    "resources": [
+      "resources/dsh-session-worker.cjs",
+      "resources/libreoffice/**/*"
+    ],
     "externalBin": [
       "binaries/dsh-desktop-sidecar"
     ],

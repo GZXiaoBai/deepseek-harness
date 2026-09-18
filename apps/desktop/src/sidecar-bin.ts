@@ -15,6 +15,7 @@ import {
   resolveDesktopShippedPresetRoot,
 } from './sidecar-module-resolver.ts'
 import { isPackagedDesktopSidecar, PACKAGED_DESKTOP_MODULES } from './sidecar-packaged-modules.ts'
+import { DESKTOP_REAL_PACKAGES_ROOT_ENV, readDesktopRealPackages } from './sidecar-real-packages.ts'
 import { buildDesktopSidecarProfileOptions, desktopSidecarReadyEvents } from './sidecar-startup.ts'
 import { selectDesktopProcess } from './sidecar-process.ts'
 
@@ -48,11 +49,12 @@ additionalModuleMappings.set(
   '@deepseek-ai/node-addon-system/flock',
   new URL('../../node-addon-system/lib/flock.js', import.meta.url).href,
 )
+const realPackages = readDesktopRealPackages(process.env[DESKTOP_REAL_PACKAGES_ROOT_ENV])
 const moduleHooks = installDesktopModuleResolver(createDesktopModuleMappings(
   resolverDependencies,
   specifier => import.meta.resolve(specifier),
   additionalModuleMappings,
-))
+), realPackages)
 
 const feasibilityIndex = process.argv.indexOf('--desktop-feasibility-probe')
 const aclRunner = process.platform === 'win32'

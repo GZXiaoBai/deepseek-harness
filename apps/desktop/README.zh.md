@@ -17,7 +17,7 @@
 
 Node PTC 程序和子进程辅助程序通过私有子入口选择器复用打包后端的可执行文件，不需要系统安装 Node，也不会启动第二个桌面后端。
 
-sidecar 把 Web 后端、内置插件和 Web 资源嵌入 VFS；目标平台专用的 `node-pty`、ripgrep 和进程辅助程序仍是普通 sidecar 文件。安装包不包含开发用 TypeScript、source map、测试或文档。第三方插件保留在用户 Harness profile 的磁盘目录中，可以加载自己的私有依赖，并共享打包后的 Cordis 与 Harness Service Definition 单例。
+sidecar 把 Web 后端、内置插件和 Web 资源嵌入 VFS；目标平台专用的 `node-pty`、ripgrep 和进程辅助程序仍是普通 sidecar 文件。Office 文档转换把 `@deepseek-ai/libreoffice-kit` API 及其平台引擎作为普通资源放在 `resources/libreoffice/` 下，因为引擎会作为子进程启动；外壳把该目录传给 sidecar，sidecar 从磁盘解析这些 package，嵌入式运行时不包含它们。安装包不包含开发用 TypeScript、source map、测试或文档。第三方插件保留在用户 Harness profile 的磁盘目录中，可以加载自己的私有依赖，并共享打包后的 Cordis 与 Harness Service Definition 单例。
 
 ## 安装与更新
 

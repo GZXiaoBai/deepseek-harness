@@ -21,8 +21,9 @@ const PRODUCT_NAME = 'DeepSeek Harness'
 const DESKTOP_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const STARTUP_TIMEOUT_MS = 20_000
 const SHUTDOWN_TIMEOUT_MS = 15_000
-const MAX_APP_FILES = 500
-const MAX_APP_BYTES = 250 * 1024 * 1024
+// The packaged office engine ships as ordinary resources: about 2,000 files and 300 MB per platform.
+const MAX_APP_FILES = 8_000
+const MAX_APP_BYTES = 900 * 1024 * 1024
 const MAX_CI_PAGE_LOAD_MS = 10_000
 const MAX_CI_INSTALL_MS = 60_000
 const SMOKE_EXIT_AFTER_HIDE_MS = 1_500
