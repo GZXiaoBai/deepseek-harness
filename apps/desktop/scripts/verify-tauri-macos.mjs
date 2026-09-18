@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseDesktopReadyUrl, requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
+import { stagedEngineDirectory, verifyStagedLibreOfficeEngine } from './verify-libreoffice-engine.mjs'
 
 export {
   requireHarnessFunctionality,
@@ -45,6 +46,10 @@ export async function verifyTauriMacosPackage() {
   const dmgs = (await readdir(plan.releaseDirectory)).filter(name => name.endsWith('-arm64.dmg'))
   if (dmgs.length !== 1) throw new Error(`Expected exactly one arm64 DMG, found ${dmgs.length}`)
   const payload = await summarizeAndAudit(plan.app)
+  const engine = await verifyStagedLibreOfficeEngine(stagedEngineDirectory(
+    join(plan.app, 'Contents/Resources/resources/libreoffice'), 'darwin', 'arm64',
+  ))
+  if (engine.files === 0) throw new Error('Staged office engine contains no verified files')
   if (payload.files > MAX_APP_FILES) throw new Error(`App file count exceeded ${MAX_APP_FILES}: ${payload.files}`)
   if (payload.bytes > MAX_APP_BYTES) throw new Error(`App size exceeded ${MAX_APP_BYTES}: ${payload.bytes}`)
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', plan.app])

@@ -16,6 +16,7 @@ import { basename, dirname, extname, join, resolve, win32 } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseDesktopReadyUrl, requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
+import { stagedEngineDirectory, verifyStagedLibreOfficeEngine } from './verify-libreoffice-engine.mjs'
 
 const PRODUCT_NAME = 'DeepSeek Harness'
 const DESKTOP_ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -150,8 +151,17 @@ async function validateAppPayload(directory, executable, uninstaller) {
     await requireFile(join(directory, helper), `Tauri sidecar helper is missing: ${helper}`)
   }
   await requireNoReparsePoints(directory)
+  // The staged office engine is vendor content copied verbatim: its own package
+  // publishes the digests verified here, and it pairs reviewed 32-bit helpers
+  // with x64 images, so the x64 audit covers the rest of the payload.
+  const officeResources = join('resources', 'libreoffice')
+  await requireDirectory(join(directory, officeResources), 'Staged office resources are missing')
+  const engine = await verifyStagedLibreOfficeEngine(stagedEngineDirectory(
+    join(directory, officeResources), 'win32', 'x64',
+  ))
+  if (engine.files === 0) throw new Error('Staged office engine contains no verified files')
   const expectedNonX64Pe = uninstaller === undefined ? {} : { [uninstaller]: 0x014c }
-  const peFiles = await auditX64Pe(directory, { expectedNonX64Pe })
+  const peFiles = await auditX64Pe(directory, { expectedNonX64Pe, ignoredRelativePaths: [officeResources] })
   if (peFiles.length < 3) throw new Error(`Expected at least three x64 PE payloads, found ${peFiles.length}`)
   const summary = await summarizeTree(directory)
   if (summary.files > MAX_APP_FILES) throw new Error(`Installed file count exceeded ${MAX_APP_FILES}: ${summary.files}`)
