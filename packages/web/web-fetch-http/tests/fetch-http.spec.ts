@@ -4,12 +4,21 @@ import { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import { HttpFetchProvider, LOCAL_FETCH_PROVIDER_ID } from '@deepseek-ai/dsh-web-fetch-http'
-import type { HttpFetchLimits } from '@deepseek-ai/dsh-web-fetch-http'
+import type { HttpFetchLimits, HttpFetchResolver } from '@deepseek-ai/dsh-web-fetch-http'
 import * as fetchPlugin from '@deepseek-ai/dsh-web-fetch-http'
-import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from '../src/policy.ts'
+import { createPinnedLookup, isPublicIpAddress, publicHttpNetwork, requestPinned, resolvePublicAddresses } from '../src/network.ts'
+import { parseResolverInterceptionRanges, RESOLVER_INTERCEPTION_POOLS } from '../src/policy.ts'
+import {
+  classifyContentType,
+  decoderForCharset,
+  isSameOrigin,
+  parseCharset,
+  parseFetchUrl,
+  validateFetchUrl,
+  WEB_FETCH_MAX_URL_LENGTH,
+} from '../src/policy.ts'
 
 const limits: HttpFetchLimits = {
-  maxUrlLength: 2048,
   maxResponseBytes: 5_000_000,
   maxBodyChars: 100_000,
   timeoutMs: 5_000,
@@ -22,6 +31,7 @@ type Handler = (req: IncomingMessage, res: ServerResponse) => void
 let server: Server
 let base: string
 let handler: Handler
+let restoreResolution: () => void
 
 beforeEach(async () => {
   handler = (_req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('default') }
@@ -29,10 +39,13 @@ beforeEach(async () => {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const { port } = server.address() as AddressInfo
   base = `http://127.0.0.1:${port}`
+  const spy = vi.spyOn(publicHttpNetwork, 'resolve').mockResolvedValue([{ address: '127.0.0.1', family: 4 }])
+  restoreResolution = () => { spy.mockRestore() }
 })
 
 afterEach(async () => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   await new Promise<void>(resolve => server.close(() => { resolve() }))
 })
 
@@ -42,11 +55,15 @@ function provider(overrides: Partial<HttpFetchLimits> = {}): HttpFetchProvider {
 
 describe('policy helpers', () => {
   it('validates scheme, credentials, and length', () => {
-    expect(validateFetchUrl('https://example.com/x', 2048).hostname).toBe('example.com')
-    expect(() => validateFetchUrl('ftp://example.com', 2048)).toThrow(expect.objectContaining({ code: 'WEB_INVALID_URL' }))
-    expect(() => validateFetchUrl('not a url', 2048)).toThrow(expect.objectContaining({ code: 'WEB_INVALID_URL' }))
-    expect(() => validateFetchUrl('https://user:pass@example.com', 2048)).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
-    expect(() => validateFetchUrl(`https://example.com/${'a'.repeat(3000)}`, 2048)).toThrow(expect.objectContaining({ code: 'WEB_INVALID_URL' }))
+    expect(parseFetchUrl('https://example.com/preflight').pathname).toBe('/preflight')
+    expect(validateFetchUrl('https://example.com/x').hostname).toBe('example.com')
+    expect(() => validateFetchUrl('ftp://example.com')).toThrow(expect.objectContaining({ code: 'WEB_INVALID_URL' }))
+    expect(() => validateFetchUrl('not a url')).toThrow(expect.objectContaining({ code: 'WEB_INVALID_URL' }))
+    expect(() => validateFetchUrl('https://user:pass@example.com')).toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    const prefix = 'https://example.com/'
+    const exact = `${prefix}${'a'.repeat(WEB_FETCH_MAX_URL_LENGTH - prefix.length)}`
+    expect(validateFetchUrl(exact).href).toBe(exact)
+    expect(() => validateFetchUrl(`${exact}a`)).toThrow(expect.objectContaining({ code: 'WEB_INVALID_URL' }))
   })
 
   it('classifies content types', () => {
@@ -78,6 +95,206 @@ describe('policy helpers', () => {
   })
 })
 
+describe('public-network policy', () => {
+  it('accepts only globally reachable unicast addresses', () => {
+    for (const address of ['8.8.8.8', '2001:4860:4860::8888', '::ffff:8.8.8.8']) {
+      expect(isPublicIpAddress(address), address).toBe(true)
+    }
+    for (const address of [
+      '0.0.0.0',
+      '10.0.0.1',
+      '100.64.0.1',
+      '127.0.0.1',
+      '169.254.169.254',
+      '192.0.2.1',
+      '224.0.0.1',
+      '255.255.255.255',
+      '::',
+      '::1',
+      'fe80::1',
+      'fc00::1',
+      'ff02::1',
+      '::ffff:127.0.0.1',
+      '64:ff9b::808:808',
+      'not-an-ip',
+    ]) {
+      expect(isPublicIpAddress(address), address).toBe(false)
+    }
+  })
+
+  it('accepts a declared resolver-interception answer and keeps every other range blocked', () => {
+    const ranges = parseResolverInterceptionRanges(['198.18.0.0/15'])
+    expect(isPublicIpAddress('198.18.0.12', ranges)).toBe(true)
+    expect(isPublicIpAddress('198.19.255.254', ranges)).toBe(true)
+    expect(isPublicIpAddress('::ffff:198.18.0.12', ranges)).toBe(true)
+    expect(isPublicIpAddress('198.18.0.12')).toBe(false)
+    for (const address of ['240.0.0.1', '10.0.0.1', '127.0.0.1', '169.254.169.254', '::ffff:10.0.0.1', 'fc00::1']) {
+      expect(isPublicIpAddress(address, ranges), address).toBe(false)
+    }
+    const wide = parseResolverInterceptionRanges(RESOLVER_INTERCEPTION_POOLS)
+    expect(isPublicIpAddress('240.0.0.1', wide)).toBe(true)
+    expect(isPublicIpAddress('10.0.0.1', wide)).toBe(false)
+  })
+
+  it('rejects interception ranges outside the accepted pools', () => {
+    expect(() => parseResolverInterceptionRanges(['198.18.0.0/15'])).not.toThrow()
+    expect(() => parseResolverInterceptionRanges(['198.18.0.0/15', '198.18.0.0/15'])).not.toThrow()
+    for (const value of ['10.0.0.0/8', '127.0.0.0/8', '192.168.0.0/16', '198.16.0.0/12', '2001:db8::/32', 'not-a-cidr']) {
+      expect(() => parseResolverInterceptionRanges([value]), value).toThrow(/resolverInterceptionRanges entry/)
+    }
+  })
+
+  it('resolves an intercepted hostname only when the deployment declares its range', async () => {
+    const resolver = vi.fn(async () => [{ address: '198.18.0.12', family: 4 }])
+    const ranges = parseResolverInterceptionRanges(['198.18.0.0/15'])
+
+    await expect(resolvePublicAddresses('example.com', new AbortController().signal, { resolver }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+    await expect(resolvePublicAddresses('example.com', new AbortController().signal, { resolver, interceptionRanges: ranges }))
+      .resolves.toEqual([{ address: '198.18.0.12', family: 4 }])
+  })
+
+  it('never treats an IP literal as an intercepted answer', async () => {
+    const ranges = parseResolverInterceptionRanges(['198.18.0.0/15'])
+    await expect(resolvePublicAddresses('198.18.0.12', new AbortController().signal, { interceptionRanges: ranges }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('retains one fully public DNS answer set', async () => {
+    const resolver = vi.fn(async () => [
+      { address: '8.8.4.4', family: 4 },
+      { address: '2001:4860:4860::8888', family: 6 },
+    ])
+    await expect(resolvePublicAddresses('example.test', new AbortController().signal, { resolver: resolver }))
+      .resolves.toEqual([
+        { address: '8.8.4.4', family: 4 },
+        { address: '2001:4860:4860::8888', family: 6 },
+      ])
+  })
+
+  it('rejects the whole DNS answer set when one address is not public', async () => {
+    const resolver = vi.fn(async () => [
+      { address: '8.8.8.8', family: 4 },
+      { address: '127.0.0.1', family: 4 },
+    ])
+    await expect(resolvePublicAddresses('rebinding.test', new AbortController().signal, { resolver: resolver }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('rejects empty and invalid resolver results', async () => {
+    await expect(resolvePublicAddresses('empty.test', new AbortController().signal, { resolver: async () => [] }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
+    await expect(resolvePublicAddresses('family.test', new AbortController().signal, { resolver: async () => [{ address: '8.8.8.8', family: 0 }] }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
+    await expect(resolvePublicAddresses('mismatch.test', new AbortController().signal, { resolver: async () => [{ address: '::1', family: 4 }] }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
+  })
+
+  it('validates bracketed IPv6 literals after checking for an active DNS64 prefix', async () => {
+    const resolver = vi.fn(async () => [{ address: '192.0.0.170', family: 4 }])
+    await expect(resolvePublicAddresses('[2001:4860:4860::8888]', new AbortController().signal, { resolver: resolver }))
+      .resolves.toEqual([{ address: '2001:4860:4860::8888', family: 6 }])
+    expect(resolver).toHaveBeenCalledWith('ipv4only.arpa', { all: true, order: 'verbatim' })
+  })
+
+  it('rejects a network-specific NAT64 address that translates to private IPv4', async () => {
+    const resolver = vi.fn(async (hostname: string) => hostname === 'ipv4only.arpa'
+      ? [{ address: '2001:4860:64:64::c000:aa', family: 6 }]
+      : [{ address: '2001:4860:64:64::7f00:1', family: 6 }])
+
+    await expect(resolvePublicAddresses('nat64.test', new AbortController().signal, { resolver: resolver }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
+  it('accepts a network-specific NAT64 address that translates to public IPv4', async () => {
+    const resolver = vi.fn(async (hostname: string) => hostname === 'ipv4only.arpa'
+      ? [{ address: '2001:4860:64:64::c000:aa', family: 6 }]
+      : [{ address: '2001:4860:64:64::808:808', family: 6 }])
+
+    await expect(resolvePublicAddresses('nat64.test', new AbortController().signal, { resolver: resolver }))
+      .resolves.toEqual([{ address: '2001:4860:64:64::808:808', family: 6 }])
+  })
+
+  it('deduplicates discovered prefixes and ignores addresses outside their translation layout', async () => {
+    const resolver = vi.fn(async (hostname: string) => hostname === 'ipv4only.arpa'
+      ? [
+        { address: '2001:4860:64:64::c000:aa', family: 6 },
+        { address: '2001:4860:64:64::c000:ab', family: 6 },
+        { address: '2001:4860:64:64:c0:0:aa00:0', family: 6 },
+      ]
+      : [
+        { address: '2001:4860:65:64::808:808', family: 6 },
+        { address: '2001:4860:64:64:100::1', family: 6 },
+      ])
+
+    await expect(resolvePublicAddresses('native-v6.test', new AbortController().signal, { resolver: resolver }))
+      .resolves.toEqual([
+        { address: '2001:4860:65:64::808:808', family: 6 },
+        { address: '2001:4860:64:64:100::1', family: 6 },
+      ])
+  })
+
+  it('stops waiting for DNS when the request is aborted', async () => {
+    let finish!: (value: never[]) => void
+    const resolver = vi.fn(() => new Promise<never[]>((resolve) => { finish = resolve }))
+    const controller = new AbortController()
+    const pending = resolvePublicAddresses('slow.test', controller.signal, { resolver: resolver })
+    controller.abort(new Error('stop'))
+    await expect(pending).rejects.toThrow('web fetch aborted during hostname resolution')
+    finish([])
+
+    const alreadyAborted = new AbortController()
+    alreadyAborted.abort(new Error('already stopped'))
+    await expect(resolvePublicAddresses('slow.test', alreadyAborted.signal, { resolver: resolver }))
+      .rejects.toThrow('web fetch aborted during hostname resolution')
+  })
+
+  it('propagates resolver failures', async () => {
+    await expect(resolvePublicAddresses('broken.test', new AbortController().signal, { resolver: async () => { throw new Error('dns failed') } }))
+      .rejects.toThrow('dns failed')
+  })
+
+  it('serves only the retained addresses through the connector lookup', async () => {
+    const lookup = createPinnedLookup([
+      { address: '8.8.8.8', family: 4 },
+      { address: '2001:4860:4860::8888', family: 6 },
+    ])
+    const call = (options: Parameters<typeof lookup>[1]) => new Promise<{
+      error: NodeJS.ErrnoException | null
+      address: string | import('node:dns').LookupAddress[]
+      family: number | undefined
+    }>((resolve) => {
+      lookup('fixed.test', options, (error, address, family) => { resolve({ error, address, family }) })
+    })
+
+    await expect(call({ all: true })).resolves.toMatchObject({
+      error: null,
+      address: [{ address: '8.8.8.8', family: 4 }, { address: '2001:4860:4860::8888', family: 6 }],
+    })
+    await expect(call({ family: 4 })).resolves.toMatchObject({ error: null, address: '8.8.8.8', family: 4 })
+    await expect(call({ family: 'IPv6' })).resolves.toMatchObject({ error: null, address: '2001:4860:4860::8888', family: 6 })
+    await expect(call({ family: 'IPv4' })).resolves.toMatchObject({ error: null, address: '8.8.8.8', family: 4 })
+    await expect(call({ family: 7 })).resolves.toMatchObject({ error: { code: 'ENOTFOUND' }, address: '', family: 7 })
+    await expect(call({ family: 7, all: true })).resolves.toMatchObject({ error: { code: 'ENOTFOUND' }, address: [], family: 7 })
+  })
+
+  it('pins the connection to the validated address without resolving the URL hostname again', async () => {
+    handler = (_req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('pinned') }
+    const { port } = server.address() as AddressInfo
+    const request = await requestPinned(
+      new URL(`http://does-not-resolve.invalid:${port}/`),
+      [{ address: '127.0.0.1', family: 4 }],
+      {},
+      new AbortController().signal,
+    )
+    try {
+      await expect(request.response.text()).resolves.toBe('pinned')
+    } finally {
+      await request.close()
+    }
+  })
+})
+
 describe('HttpFetchProvider success', () => {
   it('fetches a text body', async () => {
     handler = (_req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('hello world') }
@@ -92,6 +309,14 @@ describe('HttpFetchProvider success', () => {
     handler = (_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<h1>hi</h1>') }
     const result = await provider().fetch({ url: base })
     expect(result.body).toEqual({ kind: 'html', content: '<h1>hi</h1>' })
+  })
+
+  it('uses an explicitly injected validated-address resolver', async () => {
+    const resolveAddresses = vi.fn<HttpFetchResolver>(async () => [{ address: '127.0.0.1', family: 4 }])
+    const result = await new HttpFetchProvider(limits, resolveAddresses).fetch({ url: base })
+    expect(result.statusCode).toBe(200)
+    expect(resolveAddresses).toHaveBeenCalledWith('127.0.0.1', expect.any(AbortSignal))
+    expect(publicHttpNetwork.resolve).not.toHaveBeenCalled()
   })
 
   it('sends the configured user agent', async () => {
@@ -274,6 +499,12 @@ describe('HttpFetchProvider redirects', () => {
 })
 
 describe('HttpFetchProvider invalid URLs and abort', () => {
+  it('blocks a loopback destination before opening a connection', async () => {
+    restoreResolution()
+    await expect(provider().fetch({ url: base }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_BLOCKED_URL' }))
+  })
+
   it('rejects a non-http scheme before any network access', async () => {
     await expect(provider().fetch({ url: 'ftp://example.com' }))
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_INVALID_URL' }))
@@ -342,9 +573,16 @@ describe('HttpFetchProvider body cancellation on error paths', () => {
     return { response, cancelled: () => cancelled }
   }
 
+  function stubRequest(response: Response): void {
+    vi.spyOn(publicHttpNetwork, 'request').mockResolvedValue({
+      response: response as never,
+      close: async () => {},
+    })
+  }
+
   it('cancels the body when a cross-origin redirect is blocked', async () => {
     const { response, cancelled } = fakeResponse({ status: 302, headers: {}, location: 'https://elsewhere.test/' })
-    vi.stubGlobal('fetch', vi.fn(async () => response))
+    stubRequest(response)
     await expect(provider().fetch({ url: 'http://127.0.0.1:9/' }))
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_REDIRECT_BLOCKED' }))
     expect(cancelled()).toBe(true)
@@ -352,7 +590,7 @@ describe('HttpFetchProvider body cancellation on error paths', () => {
 
   it('cancels the body when an unsupported charset is rejected', async () => {
     const { response, cancelled } = fakeResponse({ status: 200, headers: { 'content-type': 'text/plain; charset=not-a-charset' } })
-    vi.stubGlobal('fetch', vi.fn(async () => response))
+    stubRequest(response)
     await expect(provider().fetch({ url: 'http://127.0.0.1:9/' }))
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_UNSUPPORTED_CONTENT_TYPE' }))
     expect(cancelled()).toBe(true)
@@ -360,7 +598,7 @@ describe('HttpFetchProvider body cancellation on error paths', () => {
 
   it('cancels the body when a redirect has no Location header', async () => {
     const { response, cancelled } = fakeResponse({ status: 302, headers: {} })
-    vi.stubGlobal('fetch', vi.fn(async () => response))
+    stubRequest(response)
     await expect(provider().fetch({ url: 'http://127.0.0.1:9/' }))
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
     expect(cancelled()).toBe(true)
@@ -416,6 +654,32 @@ describe('web-fetch-http plugin registration', () => {
     await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
     await expect(ctx.plugin(fetchPlugin, { maxRedirects: -1 }))
       .rejects.toThrow(/maxRedirects must be a non-negative integer/)
+  })
+
+  it('passes the declared resolver-interception ranges into resolution', async () => {
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
+    const resolve = vi.spyOn(publicHttpNetwork, 'resolve').mockResolvedValue([{ address: '198.18.0.12', family: 4 }])
+    const request = vi.spyOn(publicHttpNetwork, 'request').mockResolvedValue({
+      response: new Response('intercepted', { headers: { 'content-type': 'text/plain' } }) as never,
+      close: async () => {},
+    })
+    const fiber = await ctx.plugin(fetchPlugin, { resolverInterceptionRanges: ['198.18.0.0/15'] })
+    try {
+      await expect(ctx.web.fetch({ url: 'http://example.test/' })).resolves.toMatchObject({ statusCode: 200, body: { kind: 'text', content: 'intercepted' } })
+      const ranges = parseResolverInterceptionRanges(['198.18.0.0/15'])
+      expect(resolve).toHaveBeenCalledWith('example.test', expect.anything(), { interceptionRanges: ranges })
+      expect(request).toHaveBeenCalled()
+    } finally {
+      await fiber.dispose()
+    }
+  })
+
+  it('rejects an interception range outside the accepted pools at construction', async () => {
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { fetchProvider: LOCAL_FETCH_PROVIDER_ID })
+    await expect(ctx.plugin(fetchPlugin, { resolverInterceptionRanges: ['10.0.0.0/8'] }))
+      .rejects.toThrow(/resolverInterceptionRanges entry "10.0.0.0\/8" is outside the accepted pools/)
   })
 
   it('accepts maxRedirects: 0 (follow no redirects) as valid config', async () => {

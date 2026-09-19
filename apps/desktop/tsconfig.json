@@ -1,0 +1,32 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../packages/ptc-runtime/ptc-runtime-node" },
+    { "path": "../../packages/subprocess/subprocess-local" },
+    { "path": "../../packages/sandbox/sandbox-windows-acl" },
+    { "path": "../../packages/sandbox/sandbox-local" },
+    { "path": "../../packages/sandbox/sandbox-policy" },
+    { "path": "../../packages/session/session-projection" },
+    { "path": "../../packages/fs/fs-local" },
+    {
+      "path": "../../vendor/cordis"
+    },
+    {
+      "path": "../../packages/host/directory-picker"
+    },
+    {
+      "path": "../../packages/boot/app-boot"
+    },
+    {
+      "path": "../cli"
+    },
+    { "path": "../../packages/util/home-paths" }
+  ]
+}

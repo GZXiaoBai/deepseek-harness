@@ -1,8 +1,6 @@
 /**
- * `@deepseek-ai/dsh-web-fetch-http`: registers an anonymous public HTTP(S)
- * `WebFetchProvider` with `ctx.web`. A function/namespace plugin (NOT a
- * default-export service): it registers INTO the seam's fetch registry, like the
- * search providers register into the search registry.
+ * Anonymous public HTTP(S) `WebFetchProvider` plugin. It contributes to the
+ * `ctx.web` registry without owning the service.
  *
  * @module @deepseek-ai/dsh-web-fetch-http
  */
@@ -11,7 +9,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-web'
 import { HttpFetchProvider } from './provider.ts'
-import type { HttpFetchLimits } from './provider.ts'
+import type { HttpFetchLimits, HttpFetchResolver } from './provider.ts'
+import { publicHttpNetwork } from './network.ts'
+import { parseResolverInterceptionRanges } from './policy.ts'
 
 const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647
 
@@ -19,7 +19,11 @@ export {
   LOCAL_FETCH_PROVIDER_ID,
   HttpFetchProvider,
 } from './provider.ts'
-export type { HttpFetchLimits } from './provider.ts'
+export {
+  RESOLVER_INTERCEPTION_POOLS,
+  parseResolverInterceptionRanges,
+} from './policy.ts'
+export type { HttpFetchLimits, HttpFetchResolver } from './provider.ts'
 
 /** Default `User-Agent`: an explicit product agent, never a browser disguise. */
 export const DEFAULT_USER_AGENT = 'deepseek-harness/0.0.1 (+https://github.com/deepseek-ai)'
@@ -32,8 +36,6 @@ export const inject = ['web']
 
 /** Plugin config: the provider's transport and size limits plus its `User-Agent` (all defaulted). */
 export interface Config {
-  /** Maximum accepted request URL length. */
-  maxUrlLength?: number
   /** Maximum response body size in bytes. */
   maxResponseBytes?: number
   /** Maximum decoded body length in characters. */
@@ -44,15 +46,21 @@ export interface Config {
   maxRedirects?: number
   /** `User-Agent` header sent on every request. */
   userAgent?: string
+  /**
+   * IPv4 CIDRs a deployment's resolver interception maps names into, for example a fake-IP pool whose
+   * TUN routes the connection to a proxy. Answers inside a declared range are accepted as destinations;
+   * every other non-public answer stays rejected. Entries must lie inside 198.18.0.0/15 or 240.0.0.0/4.
+   */
+  resolverInterceptionRanges?: string[]
 }
 
 export const Config: z<Config> = z.object({
-  maxUrlLength: z.number().default(2048),
   maxResponseBytes: z.number().default(5_000_000),
   maxBodyChars: z.number().default(100_000),
   timeoutMs: z.number().default(30_000),
   maxRedirects: z.number().default(5),
   userAgent: z.string().default(DEFAULT_USER_AGENT),
+  resolverInterceptionRanges: z.array(z.string()).default([]),
 })
 
 /** Complete config after schemastery applies every field default. */
@@ -84,18 +92,22 @@ function assertNonNegativeInteger(name: string, value: number): void {
 export function apply(ctx: Context, config: Config): void {
   // schemastery (Config) has already filled every defaulted field.
   const resolved = config as ResolvedConfig
-  assertPositiveFinite('maxUrlLength', resolved.maxUrlLength)
   assertPositiveFinite('maxResponseBytes', resolved.maxResponseBytes)
   assertPositiveFinite('maxBodyChars', resolved.maxBodyChars)
   assertTimeoutMs(resolved.timeoutMs)
   assertNonNegativeInteger('maxRedirects', resolved.maxRedirects)
   const limits: HttpFetchLimits = {
-    maxUrlLength: resolved.maxUrlLength,
     maxResponseBytes: resolved.maxResponseBytes,
     maxBodyChars: resolved.maxBodyChars,
     timeoutMs: resolved.timeoutMs,
     maxRedirects: resolved.maxRedirects,
     userAgent: resolved.userAgent,
   }
-  ctx.web.registerFetchProvider(new HttpFetchProvider(limits))
+  // The declared ranges are resolution policy, so the provider receives a resolver carrying them
+  // rather than a range argument per request.
+  const interceptionRanges = parseResolverInterceptionRanges(resolved.resolverInterceptionRanges)
+  const resolveAddresses: HttpFetchResolver = (hostname, signal) => (
+    publicHttpNetwork.resolve(hostname, signal, { interceptionRanges })
+  )
+  ctx.web.registerFetchProvider(new HttpFetchProvider(limits, resolveAddresses))
 }
