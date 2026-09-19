@@ -3618,10 +3618,16 @@ export interface Config {
   maxRedirects?: number
   /** `User-Agent` header sent on every request. */
   userAgent?: string
+  /**
+   * IPv4 CIDRs a deployment's resolver interception maps names into, for example a fake-IP pool whose
+   * TUN routes the connection to a proxy. Answers inside a declared range are accepted as destinations;
+   * every other non-public answer stays rejected. Entries must lie inside 198.18.0.0/15 or 240.0.0.0/4.
+   */
+  resolverInterceptionRanges?: string[]
 }
 ```
 
-来源：[`packages/web/web-fetch-http/src/index.ts:32`](../packages/web/web-fetch-http/src/index.ts)
+来源：[`packages/web/web-fetch-http/src/index.ts:38`](../packages/web/web-fetch-http/src/index.ts)
 
 <a id="deepseek-aidsh-web-search-deepseek"></a>
 

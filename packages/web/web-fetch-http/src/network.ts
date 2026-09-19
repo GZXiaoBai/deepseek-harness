@@ -13,6 +13,7 @@ import type { Dispatcher, Response } from 'undici'
 
 import ipaddr from 'ipaddr.js'
 import { WebError } from '@deepseek-ai/dsh-web'
+import { isWithinResolverInterceptionRange, type Ipv4Range } from './policy.ts'
 
 /** One address resolved and retained for the subsequent pinned connection. */
 export interface PublicAddress {
@@ -33,6 +34,18 @@ export interface PinnedResponse {
 /** Resolver signature used to test public-address policy without process DNS changes. */
 export type AddressResolver = (hostname: string, options: { all: true; order: 'verbatim' }) => Promise<LookupAddress[]>
 
+/** Resolution seams a caller may replace; the deployment's interception ranges are policy. */
+export interface PublicResolutionOptions {
+  /** System lookup implementation, overridden only by focused tests. */
+  readonly resolver?: AddressResolver
+  /**
+   * Ranges a deployment's resolver interception maps names into (a fake-IP pool whose TUN routes the
+   * connection to a proxy). An answer inside one is accepted as intercepted; every other non-public
+   * answer stays rejected.
+   */
+  readonly interceptionRanges?: readonly Ipv4Range[]
+}
+
 /** RFC 6052 prefix lengths that may carry an IPv4 destination through NAT64. */
 const RFC6052_PREFIX_LENGTHS = [32, 40, 48, 56, 64, 96] as const
 const IPV4ONLY_DISCOVERY_HOST = 'ipv4only.arpa'
@@ -44,44 +57,58 @@ interface Nat64Prefix {
 }
 
 /**
- * Return whether an address is globally reachable unicast. IPv4-mapped IPv6 is
- * classified by its embedded IPv4 address; transition and translation prefixes
- * remain blocked because their eventual IPv4 destination cannot be pinned here.
+ * Return whether an address is a globally reachable unicast destination, or one
+ * a deployment's resolver interception produced. IPv4-mapped IPv6 is classified
+ * by its embedded IPv4 address; transition and translation prefixes remain
+ * blocked because their eventual IPv4 destination cannot be pinned here.
  *
  * @param input - textual IPv4 or IPv6 address.
- * @returns true only for a public unicast destination.
+ * @param interceptionRanges - ranges the deployment declares as resolver-intercepted.
+ * @returns true for a public unicast destination or a declared intercepted one.
  */
-export function isPublicIpAddress(input: string): boolean {
+export function isPublicIpAddress(input: string, interceptionRanges: readonly Ipv4Range[] = []): boolean {
   let parsed: ipaddr.IPv4 | ipaddr.IPv6
   try {
     parsed = ipaddr.parse(stripIpv6Brackets(input))
   } catch {
     return false
   }
-  if (parsed instanceof ipaddr.IPv4) return parsed.range() === 'unicast'
-  if (parsed.isIPv4MappedAddress()) return parsed.toIPv4Address().range() === 'unicast'
+  if (parsed instanceof ipaddr.IPv4) {
+    return parsed.range() === 'unicast' || isWithinResolverInterceptionRange(parsed, interceptionRanges)
+  }
+  if (parsed.isIPv4MappedAddress()) {
+    const mapped = parsed.toIPv4Address()
+    return mapped.range() === 'unicast' || isWithinResolverInterceptionRange(mapped, interceptionRanges)
+  }
   return parsed.range() === 'unicast'
 }
 
 /**
  * Resolve a hostname once and reject the complete answer set if any destination
- * is not public. The returned addresses are the only ones the transport may use.
+ * is neither public nor intercepted by the deployment's resolver. The returned
+ * addresses are the only ones the transport may use.
+ *
+ * An IP literal never becomes an intercepted destination: a literal states the
+ * destination instead of having one resolved, so nothing looked it up in an
+ * interception pool.
  *
  * @param hostname - URL hostname, including brackets when it is an IPv6 literal.
  * @param signal - aborts the wait for system resolution; an in-flight OS lookup may finish unused.
- * @param resolver - lookup implementation, overridden only by focused tests.
+ * @param options - lookup override and the deployment's declared interception ranges.
  * @returns the validated, non-empty address set.
  */
 export async function resolvePublicAddresses(
   hostname: string,
   signal: AbortSignal,
-  resolver: AddressResolver = systemLookup,
+  options: PublicResolutionOptions = {},
 ): Promise<PublicAddress[]> {
+  const resolver: AddressResolver = options.resolver ?? systemLookup
   const unbracketed = stripIpv6Brackets(hostname)
   const literalFamily = isIP(unbracketed)
   const resolved = literalFamily === 0
     ? await raceWithSignal(resolver(unbracketed, { all: true, order: 'verbatim' }), signal)
     : [{ address: unbracketed, family: literalFamily }]
+  const interceptionRanges = literalFamily === 0 ? options.interceptionRanges ?? [] : []
 
   if (resolved.length === 0) {
     throw new WebError(`hostname "${hostname}" resolved to no addresses`, 'WEB_PROVIDER_ERROR')
@@ -97,11 +124,11 @@ export async function resolvePublicAddresses(
     if ((entry.family !== 4 && entry.family !== 6) || isIP(entry.address) !== entry.family) {
       throw new WebError(`hostname "${hostname}" resolved to an invalid IP address`, 'WEB_PROVIDER_ERROR')
     }
-    if (!isPublicIpAddress(entry.address)) {
+    if (!isPublicIpAddress(entry.address, interceptionRanges)) {
       throw new WebError(`URL hostname "${hostname}" resolves to a non-public IP address`, 'WEB_BLOCKED_URL')
     }
     const translatedIpv4 = translatedIpv4Address(entry.address, nat64Prefixes)
-    if (translatedIpv4 !== undefined && !isPublicIpAddress(translatedIpv4)) {
+    if (translatedIpv4 !== undefined && !isPublicIpAddress(translatedIpv4, interceptionRanges)) {
       throw new WebError(`URL hostname "${hostname}" resolves through NAT64 to a non-public IPv4 address`, 'WEB_BLOCKED_URL')
     }
     addresses.push({ address: entry.address, family: entry.family })

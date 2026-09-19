@@ -9,7 +9,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-web'
 import { HttpFetchProvider } from './provider.ts'
-import type { HttpFetchLimits } from './provider.ts'
+import type { HttpFetchLimits, HttpFetchResolver } from './provider.ts'
+import { publicHttpNetwork } from './network.ts'
+import { parseResolverInterceptionRanges } from './policy.ts'
 
 const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647
 
@@ -17,6 +19,10 @@ export {
   LOCAL_FETCH_PROVIDER_ID,
   HttpFetchProvider,
 } from './provider.ts'
+export {
+  RESOLVER_INTERCEPTION_POOLS,
+  parseResolverInterceptionRanges,
+} from './policy.ts'
 export type { HttpFetchLimits, HttpFetchResolver } from './provider.ts'
 
 /** Default `User-Agent`: an explicit product agent, never a browser disguise. */
@@ -40,6 +46,12 @@ export interface Config {
   maxRedirects?: number
   /** `User-Agent` header sent on every request. */
   userAgent?: string
+  /**
+   * IPv4 CIDRs a deployment's resolver interception maps names into, for example a fake-IP pool whose
+   * TUN routes the connection to a proxy. Answers inside a declared range are accepted as destinations;
+   * every other non-public answer stays rejected. Entries must lie inside 198.18.0.0/15 or 240.0.0.0/4.
+   */
+  resolverInterceptionRanges?: string[]
 }
 
 export const Config: z<Config> = z.object({
@@ -48,6 +60,7 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.number().default(30_000),
   maxRedirects: z.number().default(5),
   userAgent: z.string().default(DEFAULT_USER_AGENT),
+  resolverInterceptionRanges: z.array(z.string()).default([]),
 })
 
 /** Complete config after schemastery applies every field default. */
@@ -90,5 +103,11 @@ export function apply(ctx: Context, config: Config): void {
     maxRedirects: resolved.maxRedirects,
     userAgent: resolved.userAgent,
   }
-  ctx.web.registerFetchProvider(new HttpFetchProvider(limits))
+  // The declared ranges are resolution policy, so the provider receives a resolver carrying them
+  // rather than a range argument per request.
+  const interceptionRanges = parseResolverInterceptionRanges(resolved.resolverInterceptionRanges)
+  const resolveAddresses: HttpFetchResolver = (hostname, signal) => (
+    publicHttpNetwork.resolve(hostname, signal, { interceptionRanges })
+  )
+  ctx.web.registerFetchProvider(new HttpFetchProvider(limits, resolveAddresses))
 }
