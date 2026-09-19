@@ -63,6 +63,8 @@ export const MODULE_PROXIES: Record<string, string> = {
   'node:stream': './node/builtin_modules/implemented/stream.ts',
   'node:vm': './node/builtin_modules/mock/vm.ts',
   'node:worker_threads': './node/builtin_modules/mock/worker_threads.ts',
+  'node:sea': './node/builtin_modules/mock/sea.ts',
+  'sea': './node/builtin_modules/mock/sea.ts',
   'node:sqlite': './node/builtin_modules/mock/sqlite.ts',
   // External npm replacements, named after the package each stands in for.
   '@deepseek-ai/libreoffice-kit': './node/external_packages/libreoffice-kit.ts',

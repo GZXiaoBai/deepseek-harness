@@ -103,6 +103,15 @@ describe('module identity through the loader', () => {
     expect(new EventEmitter() instanceof prefixed.EventEmitter).toBe(true)
   })
 
+  it('answers single-executable detection for a worker module and refuses its asset reads', () => {
+    const sea = loaderRequire()('node:sea') as {
+      isSea(): boolean
+      getAsset(key: string): ArrayBuffer
+    }
+    expect(sea.isSea()).toBe(false)
+    expect(() => sea.getAsset('anything')).toThrow(/node:sea.getAsset is not available in the worker host/)
+  })
+
   it('refuses a specifier the table does not hold, instead of resolving it empty', () => {
     const require = loaderRequire()
     expect(() => require('node:dns')).toThrow()
