@@ -15,10 +15,43 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tauri::webview::Cookie;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const BROWSER_AUTH_COOKIE_PREFIX: &str = "dsh-auth-";
+
+fn stale_browser_auth_cookies<'a>(
+    cookies: &'a [Cookie<'static>],
+    ready_host: &str,
+) -> impl Iterator<Item = &'a Cookie<'static>> {
+    cookies.iter().filter(move |cookie| {
+        cookie.name().starts_with(BROWSER_AUTH_COOKIE_PREFIX)
+            && cookie
+                .domain()
+                .is_some_and(|domain| domain.trim_start_matches('.') == ready_host)
+    })
+}
+
+fn clear_stale_browser_auth_cookies(
+    window: &tauri::WebviewWindow,
+    ready_url: &url::Url,
+) -> Result<usize, String> {
+    let ready_host = ready_url
+        .host_str()
+        .ok_or_else(|| "ready URL has no host".to_owned())?;
+    let cookies = window.cookies().map_err(|error| error.to_string())?;
+    let stale = stale_browser_auth_cookies(&cookies, ready_host)
+        .cloned()
+        .collect::<Vec<_>>();
+    for cookie in &stale {
+        window
+            .delete_cookie(cookie.clone())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(stale.len())
+}
 
 pub struct NavigationState {
     origin: Mutex<Option<(String, String, u16)>>,
@@ -385,6 +418,19 @@ fn handle_stdout(app: &AppHandle, log: &DesktopLog, line: &str) {
             let app = app.clone();
             let window_app = app.clone();
             let parsed = url::Url::parse(&url).expect("protocol already validated ready URL");
+            if let Some(window) = app.get_webview_window("main") {
+                match clear_stale_browser_auth_cookies(&window, &parsed) {
+                    Ok(count) if count > 0 => log.line(
+                        "desktop",
+                        &format!("removed {count} stale browser authentication cookies"),
+                    ),
+                    Ok(_) => {}
+                    Err(error) => log.line(
+                        "desktop",
+                        &format!("stale browser authentication cookie cleanup failed: {error}"),
+                    ),
+                }
+            }
             let _ = app.run_on_main_thread(move || {
                 if let Some(window) = window_app.get_webview_window("main") {
                     let _ = window.navigate(parsed);
@@ -640,6 +686,32 @@ fn attach_windows_job_and_resume(child: &Child, pid: u32) -> Result<WindowsJob, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri::webview::Cookie;
+
+    #[test]
+    fn selects_only_dsh_browser_session_cookies_for_cleanup() {
+        let cookies = [
+            Cookie::build(("dsh-auth-old-port", "old"))
+                .domain("127.0.0.1")
+                .build(),
+            Cookie::build(("unrelated-loopback-cookie", "keep"))
+                .domain("127.0.0.1")
+                .build(),
+            Cookie::build(("dsh-auth-another-port", "stale"))
+                .domain("127.0.0.1")
+                .build(),
+            Cookie::build(("dsh-auth-other-host", "keep"))
+                .domain("example.com")
+                .build(),
+        ];
+
+        assert_eq!(
+            stale_browser_auth_cookies(&cookies, "127.0.0.1")
+                .map(|cookie| cookie.name())
+                .collect::<Vec<_>>(),
+            ["dsh-auth-old-port", "dsh-auth-another-port"]
+        );
+    }
 
     #[test]
     fn navigation_allows_only_assets_and_the_exact_ready_origin() {

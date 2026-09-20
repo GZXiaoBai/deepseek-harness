@@ -40,7 +40,7 @@ Harness 菜单可以手工检查更新或切换自动检查。Release 会发布 
 
 Harness 数据位于 `Harness/`，桌面日志在 `Logs/desktop.log` 下轮转，性能统计写入 `Logs/desktop-performance.json`，设置继续保存在 `desktop-settings.json`。替换或卸载应用会保留此目录；删除此目录会重置 Desktop 与 Harness 状态。
 
-原生外壳会立即显示内置启动页，只接受 sidecar 报告的精确回环来源，拒绝弹窗和非预期顶层导航，也不向 Web UI 开放 Tauri shell、文件系统或通用 invoke API。第二次启动只聚焦现有窗口。在 Windows 上，点击窗口关闭按钮会保存窗口状态并隐藏到系统托盘；点击托盘图标或选择 **Show DeepSeek Harness** 可恢复窗口，选择托盘菜单中的 **Exit** 才会退出程序。退出时先通过协议请求 Harness dispose 并等待完成；Windows Job Object 与 macOS 进程组仅作为超时兜底。macOS 保持正常的窗口关闭行为。
+原生外壳会立即显示内置启动页，只接受 sidecar 报告的精确回环来源，拒绝弹窗和非预期顶层导航，也不向 Web UI 开放 Tauri shell、文件系统或通用 invoke API。进入认证回环地址前，外壳会删除该 host 先前的 Harness 认证 Cookie，避免随机端口反复启动导致请求头超过后端限制；无关的 WebView Cookie 保持不变。第二次启动只聚焦现有窗口。在 Windows 上，点击窗口关闭按钮会保存窗口状态并隐藏到系统托盘；点击托盘图标或选择 **Show DeepSeek Harness** 可恢复窗口，选择托盘菜单中的 **Exit** 才会退出程序。退出时先通过协议请求 Harness dispose 并等待完成；Windows Job Object 与 macOS 进程组仅作为超时兜底。macOS 保持正常的窗口关闭行为。
 
 ## 验证
 
