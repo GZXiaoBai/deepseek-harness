@@ -7,6 +7,7 @@ const {
   requireHarnessFunctionality,
   validateHarnessAgentPresetResponse,
   validateHarnessBootHtml,
+  validateHarnessPluginActivation,
 } = await import(
   pathToFileURL(join(import.meta.dirname, '../scripts/verify-tauri-macos.mjs')).href,
 ) as {
@@ -18,6 +19,7 @@ const {
   }
   validateHarnessBootHtml: (html: string) => string[]
   validateHarnessAgentPresetResponse: (response: unknown) => void
+  validateHarnessPluginActivation: (log: string) => void
   requireHarnessFunctionality: (
     url: string,
     workspacePath: string,
@@ -95,6 +97,20 @@ describe('Tauri macOS package verification plan', () => {
         result: { ok: true, value: { presets: [] } },
       })
     }).toThrow('standard Agent preset')
+  })
+
+  it('rejects a packaged profile with inactive plugin entries', () => {
+    expect(() => {
+      validateHarnessPluginActivation([
+        '1\tsidecar-stderr\tdsh: warning: 2 entries did not activate',
+        '2\tsidecar-stderr\tdeepseek-account (@deepseek-ai/dsh-deepseek-account-platform): failed to import',
+      ].join('\n'))
+    }).toThrow('2 plugin entries did not activate')
+    expect(() => {
+      validateHarnessPluginActivation(
+        '1\tsidecar-stdout\tDSH_DESKTOP/1 {"type":"phase","phase":"plugin-tree-ready","elapsedMs":800}',
+      )
+    }).not.toThrow()
   })
 
   it('exchanges the alpha launch token and authenticates every boot request with its cookie', async () => {

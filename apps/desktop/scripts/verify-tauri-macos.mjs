@@ -3,13 +3,19 @@ import { access, lstat, mkdir, mkdtemp, opendir, readFile, readdir, rm, stat, wr
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { parseDesktopReadyUrl, requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
+import {
+  parseDesktopReadyUrl,
+  requireHarnessBoot,
+  requireHarnessFunctionality,
+  validateHarnessPluginActivation,
+} from './harness-boot-audit.mjs'
 import { stagedEngineDirectory, verifyStagedLibreOfficeEngine } from './verify-libreoffice-engine.mjs'
 
 export {
   requireHarnessFunctionality,
   validateHarnessAgentPresetResponse,
   validateHarnessBootHtml,
+  validateHarnessPluginActivation,
 } from './harness-boot-audit.mjs'
 
 const DESKTOP_ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -112,6 +118,7 @@ async function verifyLaunch(executable, smokeExitAfterReadyMs) {
     if (result.code !== 0 || result.signal !== null) {
       throw new Error(`Packaged App exited with ${result.signal ?? `code ${result.code}`}: ${stderr.trim()}`)
     }
+    validateHarnessPluginActivation(await readFile(join(userData, 'Logs/desktop.log'), 'utf8'))
     await access(join(userData, 'Harness/profiles/web/cordis.yml'))
     const performance = JSON.parse(await readFile(join(userData, 'Logs/desktop-performance.json'), 'utf8'))
     if (!Number.isInteger(performance.pageLoadedMs) || performance.pageLoadedMs > MAX_PAGE_LOAD_MS) {

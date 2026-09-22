@@ -14,7 +14,12 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, resolve, win32 } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { parseDesktopReadyUrl, requireHarnessBoot, requireHarnessFunctionality } from './harness-boot-audit.mjs'
+import {
+  parseDesktopReadyUrl,
+  requireHarnessBoot,
+  requireHarnessFunctionality,
+  validateHarnessPluginActivation,
+} from './harness-boot-audit.mjs'
 import { auditX64Pe } from './pe-audit.mjs'
 import { stagedEngineDirectory, verifyStagedLibreOfficeEngine } from './verify-libreoffice-engine.mjs'
 
@@ -214,6 +219,7 @@ async function verifyLaunch(executable, cwd) {
     primary = undefined
     await requireProcessGone(lifecycle.pid)
     await requireClosedPort(lifecycle.url)
+    validateHarnessPluginActivation(await readFile(join(userData, 'Logs/desktop.log'), 'utf8'))
     return await waitForPerformance(userData, true)
   } finally {
     if (primary?.pid !== undefined) await taskkill(primary.pid)

@@ -29,6 +29,14 @@ export function parseDesktopReadyUrl(text) {
   return new URL(ready.url)
 }
 
+/** Rejects a packaged profile that reached HTTP readiness with inactive plugin entries. */
+export function validateHarnessPluginActivation(log) {
+  const inactive = /\tsidecar-stderr\tdsh: warning: ([1-9][0-9]*) entr(?:y|ies) did not activate\b/.exec(log)
+  if (inactive === null) return
+  const count = Number(inactive[1])
+  throw new Error(`${count} plugin ${count === 1 ? 'entry' : 'entries'} did not activate in the packaged profile`)
+}
+
 /** Returns every client-bundle URL after validating the required parser preloads. */
 export function validateHarnessBootHtml(html) {
   const serialized = /globalThis\["__DSH_BOOT__"\] = (\{.*?\})<\/script>/.exec(html)?.[1]
