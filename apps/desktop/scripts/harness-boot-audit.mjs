@@ -66,7 +66,7 @@ export function validateHarnessAgentPresetResponse(response) {
     throw new Error(`Harness Agent preset RPC failed: ${JSON.stringify(response?.result?.error ?? response)}`)
   }
   const standard = response.result.value?.presets?.find(candidate => candidate?.id === 'standard')
-  if (standard?.trust !== 'system' || standard?.isDefault !== true || standard?.broken !== undefined) {
+  if (standard?.isDefault !== true || standard?.broken !== undefined) {
     throw new Error(`Harness packaged runtime has no usable default standard Agent preset: ${JSON.stringify(standard)}`)
   }
 }
@@ -83,7 +83,7 @@ async function authenticateHarnessLaunch(url, timeoutMs) {
   })
   const location = exchange.headers.get('location')
   const setCookie = exchange.headers.get('set-cookie')
-  if (exchange.status !== 303 || location !== '/' || setCookie === null) {
+  if (exchange.status !== 303 || location !== './' || setCookie === null) {
     throw new Error(`Harness launch-token exchange failed with HTTP ${exchange.status}`)
   }
   const cookie = setCookie.split(';', 1)[0]

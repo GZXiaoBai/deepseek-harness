@@ -84,7 +84,7 @@ describe('Tauri macOS package verification plan', () => {
         rpcId: 'desktop-verify-agent-presets',
         result: {
           ok: true,
-          value: { presets: [{ id: 'standard', trust: 'system', isDefault: true }] },
+          value: { presets: [{ id: 'standard', order: 1, isDefault: true }] },
         },
       })
     }).not.toThrow()
@@ -123,7 +123,7 @@ describe('Tauri macOS package verification plan', () => {
       if (requests.length === 1) {
         return new Response(null, {
           status: 303,
-          headers: { location: '/', 'set-cookie': 'dsh_session=signed; Path=/; HttpOnly; SameSite=Strict' },
+          headers: { location: './', 'set-cookie': 'dsh_session=signed; Path=/; HttpOnly; SameSite=Strict' },
         })
       }
       if (url === 'http://127.0.0.1:43127/') return new Response(html, { status: 200 })
@@ -147,7 +147,7 @@ describe('Tauri macOS package verification plan', () => {
     }
     const seen: Array<{ url: string; body: TestRpcRequest }> = []
     const values = [
-      { presets: [{ id: 'standard', trust: 'system', isDefault: true }] },
+      { presets: [{ id: 'standard', order: 1, isDefault: true }] },
       { workspace: { workspaceId: 'workspace-1' }, created: true },
       { sessionId: 'session-1', agentPreset: 'standard' },
     ]

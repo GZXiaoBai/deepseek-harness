@@ -10,9 +10,7 @@ import { formatSidecarError } from './sidecar-error.ts'
 import { createDesktopLoaderInternalProxy, createPackagedSpecifierResolver } from './sidecar-loader.ts'
 import {
   createDesktopModuleMappings,
-  createDesktopPackageJsonMappings,
   installDesktopModuleResolver,
-  resolveDesktopShippedPresetRoot,
 } from './sidecar-module-resolver.ts'
 import { isPackagedDesktopSidecar, PACKAGED_DESKTOP_MODULES } from './sidecar-packaged-modules.ts'
 import { DESKTOP_REAL_PACKAGES_ROOT_ENV, readDesktopRealPackages } from './sidecar-real-packages.ts'
@@ -34,11 +32,6 @@ const resolvePackagedSpecifier = createPackagedSpecifierResolver(
   resolverDependencies,
   specifier => import.meta.resolve(specifier),
 )
-const packagedPackageJson = createDesktopPackageJsonMappings(
-  [...resolverDependencies, '@deepseek-ai/dsh'],
-  specifier => import.meta.resolve(specifier),
-)
-const shippedPresetRoot = resolveDesktopShippedPresetRoot(packagedPackageJson)
 const additionalModuleMappings = new Map([
   [
     '@deepseek-ai/dsh-desktop/sidecar-directory-picker',
@@ -123,7 +116,6 @@ async function runDesktopSidecar(): Promise<void> {
         loadLayeredEnv('dsh'),
         patchPath,
         import.meta.url,
-        shippedPresetRoot,
         packagedDependencies,
       ),
       prepareHost: (ctx) => {

@@ -10,9 +10,9 @@ export async function verifySessionWorker(workerPath) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-session-worker-'))
   try {
     const entry = join(root, 'worker.cjs')
-    const path = join(root, 'session.v3.jsonl')
+    const path = join(root, 'session.v4.jsonl')
     await copyFile(workerPath, entry)
-    await writeFile(path, JSON.stringify({ type: 'session', version: 3, id: 'desktop-worker', createdAt: 1, delegationDepth: 0, isSeeded: false }) + '\n')
+    await writeFile(path, JSON.stringify({ type: 'session', version: 4, id: 'desktop-worker', createdAt: 1, delegationDepth: 0, isSeeded: false }) + '\n')
     for (const count of [0, 1]) {
       const worker = new Worker(entry, {
         execArgv: [],
