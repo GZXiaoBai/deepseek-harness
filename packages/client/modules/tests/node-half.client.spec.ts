@@ -15,6 +15,9 @@ import * as modulesClient from '../src/client/index.ts'
 import { ClientModuleRegistry, bootInjections, orderByModuleGraph } from '../src/index.ts'
 import type { ClientModuleLoaderTarget, WebBootEntry, WebBootGraph } from '../src/client/index.ts'
 
+// Node accepts indexed source maps at runtime, but its constructor type omits them.
+const IndexedSourceMap = SourceMap as new (payload: object) => SourceMap
+
 const MODULES_ID = '@deepseek-ai/dsh-client-modules'
 const UI_RENDERER_ID = '@deepseek-ai/dsh-client-ui-renderer'
 
@@ -641,7 +644,7 @@ describe('client bundle activation', () => {
         sourcesContent: ['window.generation = 1\n'],
       },
     ])
-    const consumer = new SourceMap(payload as unknown as ConstructorParameters<typeof SourceMap>[0])
+    const consumer = new IndexedSourceMap(payload)
     expect(consumer.findEntry(0, 0)).toMatchObject({
       originalSource: '/packages/client/generated-0/lib/client.js',
     })
@@ -1017,7 +1020,7 @@ describe('client bundle activation', () => {
     const batch = service.graph().batches[0]!
     const script = await routeRequest(route, batch.url)
     expect(script.body).toEqual(Buffer.from(
-      `${source};\nwindow.following = true\n;\n//# sourceMappingURL=${mapUrl(batch.url)}\n`,
+      `${source};\nwindow.following = true\n;\n//# sourceMappingURL=${mapReference(batch.url)}\n`,
     ))
     const payload = JSON.parse((await routeRequest(route, mapUrl(batch.url))).body.toString('utf8')) as {
       sections: { offset: { line: number; column: number }; map: Record<string, unknown> }[]
@@ -1038,7 +1041,7 @@ describe('client bundle activation', () => {
         },
       },
     ])
-    const consumer = new SourceMap(payload as unknown as ConstructorParameters<typeof SourceMap>[0])
+    const consumer = new IndexedSourceMap(payload)
     expect(consumer.findEntry(nextLine - 2, 0)).toMatchObject({
       originalSource: `/plugins/${firstName}/client.js`, originalLine: nextLine - 2,
     })

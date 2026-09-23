@@ -12,6 +12,7 @@ import { createApplicationMenu, type ApplicationMenu, type ApplicationMenuItem }
 import { classifyNavigation } from './navigation-policy.ts'
 import { loadWindowBounds, saveWindowBounds, type DisplayBounds, type WindowBounds } from './window-state.ts'
 import { DesktopUpdater } from './updater.ts'
+import { startupFailureTitle } from './locale.ts'
 import {
   DEFAULT_DESKTOP_SETTINGS,
   loadDesktopSettings,
@@ -736,7 +737,7 @@ class ElectronAdapter implements DesktopAdapter {
   async showStartupFailure(error: Error): Promise<StartupFailureAction> {
     const result = await this.#electron.dialog.showMessageBox({
       type: 'error',
-      message: 'DeepSeek Harness could not start',
+      message: startupFailureTitle,
       detail: error.message,
       buttons: ['Retry', 'Open Logs Directory', 'Quit'],
       defaultId: 0,
@@ -791,7 +792,10 @@ async function runElectronMain(): Promise<void> {
         platform: process.platform,
         preferences: DEFAULT_DESKTOP_SETTINGS.updater,
         ops: {
-          fetchJson: async url => await (await fetch(url)).json() as unknown,
+          fetchJson: async (url) => {
+            const response: unknown = await (await fetch(url)).json()
+            return response
+          },
           fetchText: async url => await (await fetch(url)).text(),
           download: async (url, destination) => {
             const response = await fetch(url)

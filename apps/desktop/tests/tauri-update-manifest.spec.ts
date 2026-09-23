@@ -83,7 +83,7 @@ describe('Tauri update manifest', () => {
       version: '0.1.1-rc.1',
       pubDate: '2026-08-21T00:00:00.000Z',
     })
-    const manifest = JSON.parse(await readFile(output, 'utf8')) as unknown as {
+    const manifest = JSON.parse(await readFile(output, 'utf8')) as {
       platforms: Record<string, { signature: string }>
     }
     expect(manifest.platforms['windows-x86_64']?.signature).toBe('win-signature')

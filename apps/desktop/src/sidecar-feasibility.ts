@@ -182,7 +182,7 @@ async function probeKoffi(): Promise<boolean> {
 }
 
 async function probeExternalPlugin(externalPluginPath: string): Promise<boolean> {
-  const plugin = await import(pathToFileURL(externalPluginPath).href) as unknown as object
+  const plugin = await import(pathToFileURL(externalPluginPath).href) as object
   const probe: unknown = Reflect.get(plugin, 'probeDesktopPeers')
   if (typeof probe !== 'function') throw new Error('external feasibility plugin has no probeDesktopPeers export')
   const runProbe = probe as (

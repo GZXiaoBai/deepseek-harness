@@ -19,7 +19,7 @@ export interface LaunchConfig {
  * @param maxMessageBytes - Validated frame and queued-write limit.
  * @returns Arguments following the resolved Node executable.
  */
-export function bootstrapArgs(fs: FileSystem, config: LaunchConfig, maxMessageBytes: number): string[] {
+export function bootstrapArgs(fs: Pick<FileSystem, 'processPathFromHostPath'>, config: LaunchConfig, maxMessageBytes: number): string[] {
   if (config.bootstrapPath !== undefined) return [config.bootstrapPath, String(maxMessageBytes)]
   if (isSea() || 'pkg' in process) return [String(maxMessageBytes)]
   const mapped = (path: string): string => {
