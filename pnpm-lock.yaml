@@ -614,13 +614,16 @@ importers:
         version: 22.20.0
       electron:
         specifier: 43.4.0
-        version: 43.4.0
+        version: 43.4.0(supports-color@9.4.0)
       electron-builder:
         specifier: 26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
       node-gyp:
         specifier: 12.4.0
         version: 12.4.0
+      pnpm:
+        specifier: 11.7.0
+        version: 11.7.0
       sharp:
         specifier: ^0.35.3
         version: 0.35.3(@types/node@22.20.0)
@@ -22552,7 +22555,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@electron/get@5.1.0':
+  '@electron/get@5.1.0(supports-color@9.4.0)':
     dependencies:
       debug: 4.4.3(supports-color@9.4.0)
       env-paths: 3.0.0
@@ -25887,10 +25890,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@43.4.0:
+  electron@43.4.0(supports-color@9.4.0):
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
-      '@electron/get': 5.1.0
+      '@electron/get': 5.1.0(supports-color@9.4.0)
       '@types/node': 24.13.3
     transitivePeerDependencies:
       - supports-color

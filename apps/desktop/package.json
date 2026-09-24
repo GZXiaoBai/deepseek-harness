@@ -63,6 +63,7 @@
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
     "node-gyp": "12.4.0",
+    "pnpm": "11.7.0",
     "sharp": "^0.35.3",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
